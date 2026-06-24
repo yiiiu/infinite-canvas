@@ -8,3 +8,7 @@ data/
 *.tsbuildinfo
 .DS_Store
 .idea
+.cursor/
+memory/
+codegraph/
+docs/dev/*.md
