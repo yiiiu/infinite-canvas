@@ -1,0 +1,53 @@
+{
+    "id": "openai-compat",
+    "name": "OpenAI Compatible",
+    "version": "0.1.0",
+    "description": "OpenAI 兼容图像、音频和视频生成 Provider。",
+    "capabilities": ["image", "audio", "video"],
+    "allowsCustomModels": true,
+    "models": [],
+    "parameterSchemas": {
+        "image": {
+            "type": "object",
+            "properties": {
+                "baseUrl": { "type": "string" },
+                "apiKey": { "type": "string" },
+                "model": { "type": "string" },
+                "prompt": { "type": "string" },
+                "size": { "type": "string" },
+                "quality": { "type": "string" },
+                "count": { "type": "number" },
+                "responseFormat": { "type": "string" }
+            },
+            "required": ["baseUrl", "apiKey", "prompt"]
+        },
+        "audio": {
+            "type": "object",
+            "properties": {
+                "baseUrl": { "type": "string" },
+                "apiKey": { "type": "string" },
+                "model": { "type": "string" },
+                "input": { "type": "string" },
+                "voice": { "type": "string" },
+                "format": { "type": "string" },
+                "speed": { "type": "number" },
+                "instructions": { "type": "string" }
+            },
+            "required": ["baseUrl", "apiKey", "input"]
+        },
+        "video": {
+            "type": "object",
+            "properties": {
+                "baseUrl": { "type": "string" },
+                "apiKey": { "type": "string" },
+                "model": { "type": "string" },
+                "prompt": { "type": "string" },
+                "size": { "type": "string" },
+                "seconds": { "type": "number" },
+                "pollIntervalMs": { "type": "number" },
+                "timeoutMs": { "type": "number" }
+            },
+            "required": ["baseUrl", "apiKey", "prompt"]
+        }
+    }
+}

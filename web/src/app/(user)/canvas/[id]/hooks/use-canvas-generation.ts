@@ -1,4 +1,4 @@
- import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { nanoid } from "nanoid";
 
@@ -6,6 +6,15 @@ import { requestEdit, requestGeneration, requestImageQuestion } from "@/services
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { uploadImage } from "@/services/image-storage";
+import { defaultProviderClient } from "@/providers";
+import { normalizeProviderError } from "@/providers/core/error-normalize";
+import { proxyFetch } from "@/providers/core/proxy-fetch";
+import { isNewProviderEnabled } from "@/providers/feature-flags";
+import { aiConfigToProviderRequest } from "@/providers/openai-compat/config-bridge";
+import type { AiConfig } from "@/stores/use-config-store";
+import type { UploadedFile } from "@/services/file-storage";
+import type { ReferenceImage } from "@/types/image";
+import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../../constants";
 import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext } from "../../components/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "../../components/canvas-node-prompt-panel";
@@ -42,7 +51,7 @@ type ModalApi = {
 
 type Params = {
     effectiveConfig: any;
-    isAiConfigReady: (config: any, model?: string) => boolean;
+    isAiConfigReady: (config: any, model: string) => boolean;
     openConfigDialog: (open?: boolean) => void;
     nodesRef: MutableRefObject<CanvasNodeData[]>;
     connectionsRef: MutableRefObject<CanvasConnection[]>;
@@ -75,6 +84,44 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
         height: spec.height,
         metadata: { ...spec.metadata, ...metadata },
     };
+}
+
+async function generateImageResult(config: AiConfig, prompt: string, references: ReferenceImage[], signal: AbortSignal): Promise<{ dataUrl: string | Blob }> {
+    if (shouldUseProvider(config, "image") && references.length === 0) {
+        const result = await defaultProviderClient.generate("openai-compat", { ...aiConfigToProviderRequest(config, "image", { prompt, count: 1 }), signal });
+        const image = result.outputs.find((output) => output.type === "image");
+        if (image?.dataUrl) return { dataUrl: image.dataUrl };
+        if (image?.url) return { dataUrl: await (await proxyFetch(image.url, { signal })).blob() };
+        throw new Error("图像接口没有返回图片");
+    }
+    return references.length ? requestEdit({ ...config, count: "1" }, prompt, references, undefined, { signal }).then((items) => items[0]) : requestGeneration({ ...config, count: "1" }, prompt, { signal }).then((items) => items[0]);
+}
+
+async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal): Promise<UploadedFile> {
+    if (shouldUseProvider(config, "audio")) {
+        const result = await defaultProviderClient.generate("openai-compat", { ...aiConfigToProviderRequest(config, "audio", { input: prompt }), signal });
+        const audio = result.outputs.find((output) => output.type === "audio");
+        if (audio?.blob) return storeGeneratedAudio(audio.blob, config.audioFormat);
+        if (audio?.url) return storeGeneratedAudio(await (await proxyFetch(audio.url, { signal })).blob(), config.audioFormat);
+        throw new Error("音频接口没有返回可播放的音频");
+    }
+    return storeGeneratedAudio(await requestAudioGeneration(config, prompt, { signal }), config.audioFormat);
+}
+
+async function generateVideoResult(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], signal: AbortSignal): Promise<UploadedFile> {
+    return storeGeneratedVideo(await requestVideoGeneration(config, prompt, references, videoReferences, audioReferences, { signal }));
+}
+
+function shouldUseProvider(config: AiConfig, capability: "image" | "audio") {
+    return config.apiFormat === "openai" && isNewProviderEnabled(capability);
+}
+
+function isCanvasGenerationCanceled(error: unknown) {
+    return isGenerationCanceled(error) || normalizeProviderError(error).code === "canceled";
+}
+
+function generationErrorMessage(error: unknown) {
+    return normalizeProviderError(error, "生成失败").message;
 }
 
 export function useCanvasGeneration({
@@ -257,9 +304,7 @@ export function useCanvasGeneration({
                     await Promise.all(
                         targetIds.map(async (targetId) => {
                             try {
-                                const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                const image = await generateImageResult(generationConfig, effectivePrompt, referenceImages, controller.signal);
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
@@ -278,8 +323,8 @@ export function useCanvasGeneration({
                                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                                 return true;
                             } catch (error) {
-                                if (isGenerationCanceled(error)) return false;
-                                const errorDetails = error instanceof Error ? error.message : "生成失败";
+                                if (isCanvasGenerationCanceled(error)) return false;
+                                const errorDetails = generationErrorMessage(error);
                                 hasFailure = true;
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
                             } finally {
@@ -327,7 +372,7 @@ export function useCanvasGeneration({
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     try {
-                        const video = await storeGeneratedVideo(await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, { signal: controller.signal }));
+                        const video = await generateVideoResult(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, controller.signal);
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                         setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) } } : node)));
                     } finally {
@@ -355,7 +400,7 @@ export function useCanvasGeneration({
                     if (!isEmptyAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
                     try {
-                        const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
+                        const audio = await generateAudioResult(generationConfig, effectivePrompt, controller.signal);
                         setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
                     } finally {
                         finishGenerationRequest(audioId, controller);
@@ -416,8 +461,8 @@ export function useCanvasGeneration({
                     ),
                 );
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
-                const errorDetails = error instanceof Error ? error.message : "生成失败";
+                if (isCanvasGenerationCanceled(error)) return;
+                const errorDetails = generationErrorMessage(error);
                 message.error(errorDetails);
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } }) : node)),
@@ -487,18 +532,18 @@ export function useCanvasGeneration({
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
-                    const video = await storeGeneratedVideo(await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], { signal: controller.signal }));
+                    const video = await generateVideoResult(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], controller.signal);
                     const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, width: videoSize.width, height: videoSize.height, position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 }, metadata: { ...item.metadata, ...videoMetadata(video), prompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark } } : item)));
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal }), generationConfig.audioFormat);
+                    const audio = await generateAudioResult(generationConfig, prompt, controller.signal);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
                     return;
                 }
 
-                const image = useReferenceImages ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal }).then((items) => items[0]) : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
+                const image = await generateImageResult(generationConfig, prompt, useReferenceImages ? retryImages : [], controller.signal);
                 const uploadedImage = await uploadImage(image.dataUrl);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
@@ -513,8 +558,8 @@ export function useCanvasGeneration({
                     ),
                 );
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
-                const errorDetails = error instanceof Error ? error.message : "生成失败";
+                if (isCanvasGenerationCanceled(error)) return;
+                const errorDetails = generationErrorMessage(error);
                 message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
