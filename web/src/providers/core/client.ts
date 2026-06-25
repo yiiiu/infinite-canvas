@@ -8,12 +8,12 @@ export type ProviderClient = {
 
 export type ProviderClientOptions = {
     readonly registry?: ProviderRegistry;
-    readonly context?: Partial<AdapterContext>;
+    readonly context?: Partial<Pick<AdapterContext, "fetch" | "now">>;
 };
 
 export function createProviderClient(options: ProviderClientOptions = {}): ProviderClient {
     const registry = options.registry ?? providerRegistry;
-    const context: AdapterContext = {
+    const baseContext = {
         now: options.context?.now ?? (() => new Date()),
         fetch: options.context?.fetch ?? proxyFetch,
     };
@@ -28,6 +28,12 @@ export function createProviderClient(options: ProviderClientOptions = {}): Provi
             }
 
             assertRequestSupported(adapter, request.capability, request.modelId);
+
+            const context: AdapterContext = {
+                ...baseContext,
+                responseMode: adapter.manifest.responseMode,
+                pendingId: request.pendingId,
+            };
 
             try {
                 return await adapter.generate(request, context);

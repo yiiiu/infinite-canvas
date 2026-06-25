@@ -1,6 +1,8 @@
 export const PROVIDER_CAPABILITIES = ["text", "image", "image-edit", "video", "audio"] as const;
+export const PROVIDER_RESPONSE_MODES = ["sync", "async-pollable"] as const;
 
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
+export type ProviderResponseMode = (typeof PROVIDER_RESPONSE_MODES)[number];
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
@@ -25,11 +27,16 @@ export type JsonSchema = {
     readonly allOf?: readonly JsonSchema[];
 };
 
+export type ReferenceImageInput = {
+    readonly url: string;
+};
+
 export type ProviderModel = {
     readonly id: string;
     readonly name?: string;
     readonly description?: string;
     readonly capabilities: readonly ProviderCapability[];
+    readonly supportsReferenceImages?: boolean;
     readonly parameterSchema?: JsonSchema;
 };
 
@@ -39,6 +46,7 @@ export type ProviderManifest = {
     readonly version: string;
     readonly description?: string;
     readonly homepage?: string;
+    readonly responseMode: ProviderResponseMode;
     readonly capabilities: readonly ProviderCapability[];
     readonly allowsCustomModels?: boolean;
     readonly models?: readonly ProviderModel[];
@@ -51,6 +59,7 @@ export type GenerateRequest<TParams extends JsonObject = JsonObject> = {
     readonly modelId: string;
     readonly params: TParams;
     readonly signal: AbortSignal | undefined;
+    readonly pendingId?: string;
     readonly metadata?: JsonObject;
 };
 
@@ -82,6 +91,8 @@ export type ProviderFetch = (url: string | URL, init?: RequestInit) => Promise<R
 export type AdapterContext = {
     readonly fetch: ProviderFetch;
     readonly now: () => Date;
+    readonly responseMode: ProviderResponseMode;
+    readonly pendingId?: string;
 };
 
 export type ProviderAdapter = {
@@ -95,9 +106,12 @@ export enum ProviderErrorCode {
     ProviderNotFound = "provider_not_found",
     UnsupportedCapability = "unsupported_capability",
     ModelNotFound = "model_not_found",
+    InvalidRequest = "invalid_request",
+    Unauthorized = "unauthorized",
+    RateLimited = "rate_limited",
+    InsufficientBalance = "insufficient_balance",
     AdapterError = "adapter_error",
     NetworkError = "network_error",
-    InvalidRequest = "invalid_request",
     Canceled = "canceled",
     Timeout = "timeout",
 }

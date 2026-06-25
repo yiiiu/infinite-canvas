@@ -1,7 +1,8 @@
-import { PROVIDER_CAPABILITIES, ProviderError, ProviderErrorCode, type JsonSchema, type JsonSchemaType, type JsonValue, type ProviderCapability, type ProviderManifest, type ProviderModel } from "./types";
+import { PROVIDER_CAPABILITIES, PROVIDER_RESPONSE_MODES, ProviderError, ProviderErrorCode, type JsonSchema, type JsonSchemaType, type JsonValue, type ProviderCapability, type ProviderManifest, type ProviderModel, type ProviderResponseMode } from "./types";
 
 const JSON_SCHEMA_TYPES = new Set<JsonSchemaType>(["string", "number", "integer", "boolean", "object", "array", "null"]);
 const PROVIDER_CAPABILITY_SET = new Set<ProviderCapability>(PROVIDER_CAPABILITIES);
+const PROVIDER_RESPONSE_MODE_SET = new Set<ProviderResponseMode>(PROVIDER_RESPONSE_MODES);
 
 type ManifestError = {
     readonly path: string;
@@ -31,6 +32,7 @@ export function collectManifestErrors(input: unknown): readonly ManifestError[] 
     assertNonEmptyString(input.id, "id", errors);
     assertNonEmptyString(input.name, "name", errors);
     assertNonEmptyString(input.version, "version", errors);
+    assertResponseMode(input.responseMode, "responseMode", errors);
     assertCapabilityList(input.capabilities, "capabilities", errors);
     if (input.allowsCustomModels !== undefined && typeof input.allowsCustomModels !== "boolean") {
         errors.push({ path: "allowsCustomModels", message: "必须是布尔值" });
@@ -72,6 +74,13 @@ function assertModels(models: unknown, manifestCapabilities: unknown, allowsCust
             modelIds.add(model.id);
         }
 
+        if (model.name !== undefined && typeof model.name !== "string") {
+            errors.push({ path: `${path}.name`, message: "必须是字符串" });
+        }
+        if (model.description !== undefined && typeof model.description !== "string") {
+            errors.push({ path: `${path}.description`, message: "必须是字符串" });
+        }
+
         assertCapabilityList(model.capabilities, `${path}.capabilities`, errors);
         if (Array.isArray(model.capabilities)) {
             model.capabilities.filter(isProviderCapability).forEach((capability) => {
@@ -79,6 +88,10 @@ function assertModels(models: unknown, manifestCapabilities: unknown, allowsCust
                     errors.push({ path: `${path}.capabilities`, message: `${capability} 未声明在 manifest capabilities 中` });
                 }
             });
+        }
+
+        if (model.supportsReferenceImages !== undefined && typeof model.supportsReferenceImages !== "boolean") {
+            errors.push({ path: `${path}.supportsReferenceImages`, message: "必须是布尔值" });
         }
 
         if (model.parameterSchema !== undefined) {
@@ -100,6 +113,12 @@ function assertParameterSchemas(value: unknown, errors: ManifestError[]) {
         }
         assertJsonSchema(schema, `parameterSchemas.${capability}`, errors);
     });
+}
+
+function assertResponseMode(value: unknown, path: string, errors: ManifestError[]) {
+    if (!isProviderResponseMode(value)) {
+        errors.push({ path, message: "必须是支持的 responseMode" });
+    }
 }
 
 function assertJsonSchema(schema: unknown, path: string, errors: ManifestError[]) {
@@ -182,6 +201,10 @@ function assertNonEmptyString(value: unknown, path: string, errors: ManifestErro
     if (typeof value !== "string" || !value.trim()) {
         errors.push({ path, message: "必须是非空字符串" });
     }
+}
+
+function isProviderResponseMode(value: unknown): value is ProviderResponseMode {
+    return typeof value === "string" && PROVIDER_RESPONSE_MODE_SET.has(value as ProviderResponseMode);
 }
 
 function isProviderCapability(value: unknown): value is ProviderCapability {

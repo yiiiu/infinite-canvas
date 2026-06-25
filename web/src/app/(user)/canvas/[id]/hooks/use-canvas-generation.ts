@@ -87,14 +87,32 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
 }
 
 async function generateImageResult(config: AiConfig, prompt: string, references: ReferenceImage[], signal: AbortSignal): Promise<{ dataUrl: string | Blob }> {
-    if (shouldUseProvider(config, "image") && references.length === 0) {
-        const result = await defaultProviderClient.generate("openai-compat", { ...aiConfigToProviderRequest(config, "image", { prompt, count: 1 }), signal });
+    if (shouldUseProvider(config, "image")) {
+        const referenceImages = references
+            .map(providerReferenceImageUrl)
+            .filter((url): url is string => Boolean(url))
+            .map((url) => ({ url }));
+        const providerRequest = aiConfigToProviderRequest(config, "image", {
+            prompt,
+            count: 1,
+            ...(referenceImages.length ? { referenceImages } : {}),
+        });
+        const result = await defaultProviderClient.generate(providerIdForParams(providerRequest.params), { ...providerRequest, signal });
         const image = result.outputs.find((output) => output.type === "image");
         if (image?.dataUrl) return { dataUrl: image.dataUrl };
         if (image?.url) return { dataUrl: await (await proxyFetch(image.url, { signal })).blob() };
         throw new Error("图像接口没有返回图片");
     }
     return references.length ? requestEdit({ ...config, count: "1" }, prompt, references, undefined, { signal }).then((items) => items[0]) : requestGeneration({ ...config, count: "1" }, prompt, { signal }).then((items) => items[0]);
+}
+
+function providerReferenceImageUrl(image: ReferenceImage) {
+    return image.url || image.dataUrl;
+}
+
+function providerIdForParams(params: { readonly baseUrl?: unknown }) {
+    const baseUrl = typeof params.baseUrl === "string" ? params.baseUrl.toLowerCase() : "";
+    return baseUrl.includes("grsai") ? "grsai" : "openai-compat";
 }
 
 async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal): Promise<UploadedFile> {

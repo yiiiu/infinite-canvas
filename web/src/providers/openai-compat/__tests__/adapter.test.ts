@@ -46,6 +46,45 @@ test("generates image through ProviderClient with custom model and ctx.fetch", a
     assert.deepEqual(result.outputs, [{ type: "image", dataUrl: "data:image/png;base64,aW1hZ2U=", mimeType: "image/png" }]);
 });
 
+test("generates image edit with reference images through ProviderClient", async () => {
+    const calls: string[] = [];
+    const fetchMock: ProviderFetch = async (url, init) => {
+        calls.push(String(url));
+        if (String(url) === "https://assets.example.test/ref.png") {
+            return new Response(new Blob(["ref"], { type: "image/png" }), {
+                status: 200,
+                headers: { "content-type": "image/png" },
+            });
+        }
+        assert.equal(String(url), "https://example.test/v1/images/edits");
+        assert.equal(init?.method, "POST");
+        assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-key");
+        const body = init?.body as FormData;
+        assert.equal(body.get("model"), "gpt-image-custom");
+        assert.equal(body.get("prompt"), "一只猫");
+        assert.equal(body.getAll("image").length, 1);
+        return new Response(JSON.stringify({ data: [{ url: "https://cdn.example.test/out.png" }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+        });
+    };
+
+    const result = await createClient(fetchMock).generate("openai-compat", {
+        capability: "image",
+        modelId: "gpt-image-custom",
+        params: {
+            baseUrl: "https://example.test",
+            apiKey: "test-key",
+            prompt: "一只猫",
+            referenceImages: [{ url: "https://assets.example.test/ref.png" }],
+        },
+        signal: undefined,
+    });
+
+    assert.deepEqual(calls, ["https://assets.example.test/ref.png", "https://example.test/v1/images/edits"]);
+    assert.deepEqual(result.outputs, [{ type: "image", url: "https://cdn.example.test/out.png" }]);
+});
+
 test("normalizes image generation errors as ProviderError", async () => {
     const fetchMock: ProviderFetch = async () =>
         new Response(JSON.stringify({ error: { message: "bad api key" } }), {

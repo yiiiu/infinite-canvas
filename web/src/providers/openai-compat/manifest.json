@@ -3,6 +3,7 @@
     "name": "OpenAI Compatible",
     "version": "0.1.0",
     "description": "OpenAI 兼容图像、音频和视频生成 Provider。",
+    "responseMode": "sync",
     "capabilities": ["image", "audio", "video"],
     "allowsCustomModels": true,
     "models": [],
@@ -17,7 +18,17 @@
                 "size": { "type": "string" },
                 "quality": { "type": "string" },
                 "count": { "type": "number" },
-                "responseFormat": { "type": "string" }
+                "responseFormat": { "type": "string" },
+                "referenceImages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "url": { "type": "string" }
+                        },
+                        "required": ["url"]
+                    }
+                }
             },
             "required": ["baseUrl", "apiKey", "prompt"]
         },

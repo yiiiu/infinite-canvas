@@ -9,6 +9,7 @@ const manifest = {
     id: "mock",
     name: "Mock Provider",
     version: "0.1.0",
+    responseMode: "sync",
     capabilities: ["text", "image"],
     models: [
         {
@@ -27,6 +28,7 @@ const request: GenerateRequest<{ readonly prompt: string }> = {
     modelId: "mock-text",
     params: { prompt: "hello" },
     signal: undefined,
+    pendingId: "pending-1",
 };
 
 test("calls a registered adapter with injected context", async () => {
@@ -39,6 +41,8 @@ test("calls a registered adapter with injected context", async () => {
         async generate(generateRequest, context) {
             receivedParams = generateRequest.params;
             assert.equal(context.fetch, fetchMock);
+            assert.equal(context.responseMode, "sync");
+            assert.equal(context.pendingId, "pending-1");
             return {
                 providerId: manifest.id,
                 capability: generateRequest.capability,

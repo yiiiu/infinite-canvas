@@ -1,0 +1,116 @@
+{
+  "id": "grsai",
+  "name": "GrsAI",
+  "version": "0.1.0",
+  "description": "GrsAI 图像生成 Provider，支持图生图与参考图编辑。",
+  "responseMode": "sync",
+  "capabilities": ["image"],
+  "allowsCustomModels": false,
+  "models": [
+    {
+      "id": "gpt-image-2-vip",
+      "name": "gpt-image-2-vip",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "gpt-image-2",
+      "name": "gpt-image-2",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-pro",
+      "name": "nano-banana-pro",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-pro-vt",
+      "name": "nano-banana-pro-vt",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-2",
+      "name": "nano-banana-2",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-fast",
+      "name": "nano-banana-fast",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-pro-cl",
+      "name": "nano-banana-pro-cl",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-2-cl",
+      "name": "nano-banana-2-cl",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-2-2k-cl",
+      "name": "nano-banana-2-2k-cl",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-pro-4k-vip",
+      "name": "nano-banana-pro-4k-vip",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-pro-vip",
+      "name": "nano-banana-pro-vip",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana-2-4k-cl",
+      "name": "nano-banana-2-4k-cl",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    },
+    {
+      "id": "nano-banana",
+      "name": "nano-banana",
+      "capabilities": ["image"],
+      "supportsReferenceImages": true
+    }
+  ],
+  "parameterSchemas": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "baseUrl": { "type": "string" },
+        "apiKey": { "type": "string" },
+        "model": { "type": "string" },
+        "prompt": { "type": "string" },
+        "size": { "type": "string" },
+        "imageSize": { "type": "string" },
+        "aspectRatio": { "type": "string" },
+        "count": { "type": "number" },
+        "variants": { "type": "number" },
+        "referenceImages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" }
+            },
+            "required": ["url"]
+          }
+        }
+      },
+      "required": ["baseUrl", "apiKey", "prompt"]
+    }
+  }
+}

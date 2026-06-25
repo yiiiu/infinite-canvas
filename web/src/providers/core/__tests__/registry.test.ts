@@ -8,6 +8,7 @@ const manifest = {
     id: "mock",
     name: "Mock Provider",
     version: "0.1.0",
+    responseMode: "sync",
     capabilities: ["text"],
     models: [
         {

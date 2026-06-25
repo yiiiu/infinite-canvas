@@ -24,6 +24,14 @@ type VideoTask = {
 
 async function generateImage(request: GenerateRequest, context: AdapterContext): Promise<GenerateResult> {
     const params = request.params;
+    const references = referenceImageUrls(params);
+    if (references.length) {
+        const payload = await postFormData(context, params, "/images/edits", await buildReferenceImageFormData(context, params, request, references), request.signal);
+        const outputs = imageOutputs(payload);
+        if (!outputs.length) throw new ProviderError(ProviderErrorCode.AdapterError, "图像编辑接口没有返回图片");
+        return result(request, outputs, payload);
+    }
+
     const payload = await postJson(context, params, "/images/generations", {
         model: modelId(request),
         prompt: requiredString(params, "prompt"),
@@ -36,6 +44,65 @@ async function generateImage(request: GenerateRequest, context: AdapterContext):
     const outputs = imageOutputs(payload);
     if (!outputs.length) throw new ProviderError(ProviderErrorCode.AdapterError, "图像接口没有返回图片");
     return result(request, outputs, payload);
+}
+
+async function buildReferenceImageFormData(context: AdapterContext, params: JsonObject, request: GenerateRequest, references: readonly string[]) {
+    const formData = new FormData();
+    formData.set("model", modelId(request));
+    formData.set("prompt", requiredString(params, "prompt"));
+    if (stringParam(params, "size")) formData.set("size", stringParam(params, "size"));
+    if (stringParam(params, "quality")) formData.set("quality", stringParam(params, "quality"));
+    if (numberParam(params, "count")) formData.set("n", String(numberParam(params, "count")));
+    if (stringParam(params, "responseFormat")) formData.set("response_format", stringParam(params, "responseFormat"));
+
+    for (let index = 0; index < references.length; index += 1) {
+        const reference = references[index];
+        const file = await fetchReferenceImage(context, reference, request.signal, index);
+        formData.append("image", file.blob, file.filename);
+    }
+
+    return formData;
+}
+
+async function postFormData(context: AdapterContext, params: JsonObject, path: string, formData: FormData, signal: AbortSignal | undefined) {
+    const response = await context.fetch(apiUrl(params, path), {
+        method: "POST",
+        headers: headers(params, null),
+        body: formData,
+        signal,
+    });
+    await assertOk(response);
+    return readJson(response);
+}
+
+async function fetchReferenceImage(context: AdapterContext, url: string, signal: AbortSignal | undefined, index: number) {
+    const response = await context.fetch(url, { signal });
+    await assertOk(response);
+    const blob = await response.blob();
+    return {
+        blob,
+        filename: referenceFilename(url, index, response.headers.get("content-type") || blob.type || "image/png"),
+    };
+}
+
+function referenceImageUrls(params: JsonObject) {
+    const value = params.referenceImages;
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((item) => (isRecord(item) && typeof item.url === "string" ? item.url.trim() : ""))
+        .filter((url) => Boolean(url));
+}
+
+function referenceFilename(url: string, index: number, contentType: string) {
+    const suffix = contentType.includes("jpeg") ? ".jpg" : contentType.includes("png") ? ".png" : contentType.includes("webp") ? ".webp" : "";
+    if (url.startsWith("data:")) return `reference-${index + 1}${suffix || ".png"}`;
+    try {
+        const name = new URL(url).pathname.split("/").filter(Boolean).pop();
+        if (name) return name.includes(".") ? name : `${name}${suffix}`;
+    } catch {
+        return `reference-${index + 1}${suffix || ".png"}`;
+    }
+    return `reference-${index + 1}${suffix || ".png"}`;
 }
 
 async function generateAudio(request: GenerateRequest, context: AdapterContext): Promise<GenerateResult> {
@@ -172,9 +239,9 @@ function apiUrl(params: JsonObject, path: string) {
     return `${apiBaseUrl}/${path.replace(/^\/+/, "")}`;
 }
 
-function headers(params: JsonObject) {
+function headers(params: JsonObject, contentType: string | null = "application/json") {
     return {
-        "Content-Type": "application/json",
+        ...(contentType ? { "Content-Type": contentType } : {}),
         Authorization: `Bearer ${requiredString(params, "apiKey")}`,
     };
 }
