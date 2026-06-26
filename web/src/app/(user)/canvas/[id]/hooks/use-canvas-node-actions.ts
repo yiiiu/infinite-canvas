@@ -8,6 +8,7 @@ import { defaultConfig } from "@/stores/use-config-store";
 import { getDataUrlByteSize } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
+import { useProviderTaskStore } from "@/providers/task-store";
 import { NODE_DEFAULT_SIZE } from "../../constants";
 import type { CanvasImageAngleParams } from "../../components/canvas-node-angle-dialog";
 import type { CanvasImageCropRect } from "../../components/canvas-node-crop-dialog";
@@ -102,6 +103,7 @@ export function useCanvasNodeActions(params: Params) {
         message,
         startGenerationRequest,
         finishGenerationRequest,
+        abortGenerationForNodeIds,
     } = params;
 
     const createNode = useCallback(
@@ -132,6 +134,8 @@ export function useCanvasNodeActions(params: Params) {
             nodesRef.current.forEach((node: CanvasNodeData) => {
                 if (ids.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => allIds.add(childId));
             });
+            abortGenerationForNodeIds?.(allIds);
+            allIds.forEach((id) => useProviderTaskStore.getState().clearNodeTasks(projectId, id));
             setNodes((prev: CanvasNodeData[]) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
                 return next.map((node) => {
@@ -168,7 +172,7 @@ export function useCanvasNodeActions(params: Params) {
             setContextMenu((current: any) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node: CanvasNodeData) => !allIds.has(node.id)), chatSessions });
         },
-        [chatSessions, cleanupCanvasFiles, projectId],
+        [abortGenerationForNodeIds, chatSessions, cleanupCanvasFiles, projectId],
     );
 
     const clearCanvas = useCallback(() => {

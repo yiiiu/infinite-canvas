@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { useProviderTaskStore } from "../../task-store";
 import { createProviderClient } from "../client";
 import { createProviderRegistry } from "../registry";
 import { ProviderError, ProviderErrorCode, type GenerateRequest, type JsonObject, type ProviderAdapter, type ProviderFetch, type ProviderManifest } from "../types";
@@ -60,6 +61,31 @@ test("calls a registered adapter with injected context", async () => {
     assert.deepEqual(receivedParams, { prompt: "hello" });
     assert.equal(result.providerId, "mock");
     assert.deepEqual(result.outputs, [{ type: "text", text: "hello" }]);
+});
+
+test("does not create task records without pendingId", async () => {
+    useProviderTaskStore.getState().resetTasks();
+    const registry = createProviderRegistry();
+    registry.register({
+        manifest,
+        async generate(generateRequest) {
+            return {
+                providerId: manifest.id,
+                capability: generateRequest.capability,
+                modelId: generateRequest.modelId,
+                outputs: [{ type: "text", text: "ok" }],
+            };
+        },
+    });
+
+    const client = createProviderClient({ registry });
+    await client.generate("mock", {
+        ...request,
+        pendingId: undefined,
+        taskContext: { projectId: "project-1", nodeId: "node-1" },
+    });
+
+    assert.deepEqual(useProviderTaskStore.getState().listProjectTasks("project-1"), []);
 });
 
 test("throws ProviderError when provider is missing", async () => {

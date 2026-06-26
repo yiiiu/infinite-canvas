@@ -56,6 +56,10 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    task?: {
+        pendingId: string;
+        status: "pending" | "running" | "completed" | "failed" | "cancelled" | "written" | "unrecoverable" | "superseded";
+    };
 };
 
 export type CanvasNodeData = {

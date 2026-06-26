@@ -385,7 +385,9 @@ function InfiniteCanvasPage() {
         setPendingConnectionCreate,
     });
 
-    const { runningNodeId, setRunningNodeId, startGenerationRequest, finishGenerationRequest, confirmStopGeneration, handleGenerateNode, handleRetryNode, generateImageFromTextNode } = useCanvasGeneration({
+    const { runningNodeId, setRunningNodeId, startGenerationRequest, finishGenerationRequest, abortGenerationForNodeIds, confirmStopGeneration, handleGenerateNode, handleRetryNode, generateImageFromTextNode } = useCanvasGeneration({
+        projectId,
+        projectLoaded,
         effectiveConfig,
         isAiConfigReady,
         openConfigDialog,
@@ -591,6 +593,7 @@ function InfiniteCanvasPage() {
         message,
         startGenerationRequest,
         finishGenerationRequest,
+        abortGenerationForNodeIds,
     });
 
     const { assistantMounted, assistantClosing, assistantOpen, agentMode, setAgentMode, codexAutoConnect, codexCompactAgent, openAgent, closeAgent, pasteAssistantImage, handleAssistantSessionsChange } = useCanvasAssistantActions({

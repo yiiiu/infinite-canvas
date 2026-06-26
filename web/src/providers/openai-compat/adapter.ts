@@ -143,6 +143,7 @@ async function generateVideo(request: GenerateRequest, context: AdapterContext):
     );
     const taskId = created.id;
     if (!taskId) throw new ProviderError(ProviderErrorCode.AdapterError, "视频接口没有返回任务 ID");
+    await context.updateTask?.({ runtimeTaskId: taskId, status: "running", message: created.status });
 
     const finalTask = await pollUntil({
         poll: async () => normalizeTask(await getJson(context, params, `/videos/${encodeURIComponent(taskId)}`, request.signal)),
@@ -150,6 +151,9 @@ async function generateVideo(request: GenerateRequest, context: AdapterContext):
         intervalMs: numberParam(params, "pollIntervalMs") || 2500,
         timeoutMs: numberParam(params, "timeoutMs") || 5 * 60 * 1000,
         signal: request.signal,
+        onProgress: ({ attempt, elapsedMs, value }) => {
+            void context.updateTask?.({ runtimeTaskId: taskId, status: "running", message: value.status, metadata: { attempt, elapsedMs } });
+        },
     });
 
     if (isFailedVideoStatus(finalTask.status)) {

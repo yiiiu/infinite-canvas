@@ -31,6 +31,22 @@ export type ReferenceImageInput = {
     readonly url: string;
 };
 
+export type ProviderTaskContext = {
+    readonly projectId: string;
+    readonly nodeId: string;
+    readonly referenceImageIds?: readonly string[];
+    readonly recoverable?: boolean;
+    readonly unrecoverableReason?: string;
+};
+
+export type ProviderTaskUpdate = {
+    readonly runtimeTaskId?: string;
+    readonly status?: "running" | "completed" | "failed";
+    readonly message?: string;
+    readonly progress?: number;
+    readonly metadata?: JsonObject;
+};
+
 export type ProviderModel = {
     readonly id: string;
     readonly name?: string;
@@ -60,6 +76,7 @@ export type GenerateRequest<TParams extends JsonObject = JsonObject> = {
     readonly params: TParams;
     readonly signal: AbortSignal | undefined;
     readonly pendingId?: string;
+    readonly taskContext?: ProviderTaskContext;
     readonly metadata?: JsonObject;
 };
 
@@ -93,6 +110,7 @@ export type AdapterContext = {
     readonly now: () => Date;
     readonly responseMode: ProviderResponseMode;
     readonly pendingId?: string;
+    readonly updateTask?: (patch: ProviderTaskUpdate) => void | Promise<void>;
 };
 
 export type ProviderAdapter = {

@@ -1,3 +1,4 @@
+import { useProviderTaskStore } from "../task-store";
 import { proxyFetch } from "./proxy-fetch";
 import { providerRegistry, type ProviderRegistry } from "./registry";
 import { ProviderError, ProviderErrorCode, type AdapterContext, type GenerateRequest, type GenerateResult, type JsonObject, type ProviderAdapter, type ProviderCapability } from "./types";
@@ -29,21 +30,41 @@ export function createProviderClient(options: ProviderClientOptions = {}): Provi
 
             assertRequestSupported(adapter, request.capability, request.modelId);
 
+            const shouldTrackTask = Boolean(request.pendingId && request.taskContext);
+            const taskStore = shouldTrackTask ? useProviderTaskStore.getState() : null;
+
+            if (shouldTrackTask && request.pendingId && request.taskContext) {
+                taskStore?.createTask({
+                    pendingId: request.pendingId,
+                    providerId,
+                    responseMode: adapter.manifest.responseMode,
+                    request,
+                    taskContext: request.taskContext,
+                });
+                taskStore?.markRunning(request.pendingId);
+            }
+
             const context: AdapterContext = {
                 ...baseContext,
                 responseMode: adapter.manifest.responseMode,
                 pendingId: request.pendingId,
+                updateTask: shouldTrackTask && request.pendingId ? (patch) => useProviderTaskStore.getState().updateTask(request.pendingId!, patch) : undefined,
             };
 
             try {
-                return await adapter.generate(request, context);
+                const result = await adapter.generate(request, context);
+                if (shouldTrackTask && request.pendingId) useProviderTaskStore.getState().completeTask(request.pendingId, result);
+                return result;
             } catch (error) {
-                if (error instanceof ProviderError) throw error;
-                if (isAbortError(error)) throw new ProviderError(ProviderErrorCode.Canceled, "请求已取消", { cause: error });
-                throw new ProviderError(ProviderErrorCode.AdapterError, error instanceof Error ? error.message : "Provider adapter 调用失败", {
-                    cause: error,
-                    details: { providerId, modelId: request.modelId, capability: request.capability },
-                });
+                const providerError = toProviderError(error, providerId, request);
+                if (shouldTrackTask && request.pendingId) {
+                    useProviderTaskStore.getState().failTask(request.pendingId, {
+                        code: providerError.code,
+                        message: providerError.message,
+                        details: providerError.details,
+                    });
+                }
+                throw providerError;
             }
         },
     };
@@ -74,6 +95,15 @@ function assertRequestSupported(adapter: ProviderAdapter, capability: ProviderCa
 }
 
 export const providerClient = createProviderClient();
+
+function toProviderError(error: unknown, providerId: string, request: GenerateRequest): ProviderError {
+    if (error instanceof ProviderError) return error;
+    if (isAbortError(error)) return new ProviderError(ProviderErrorCode.Canceled, "请求已取消", { cause: error });
+    return new ProviderError(ProviderErrorCode.AdapterError, error instanceof Error ? error.message : "Provider adapter 调用失败", {
+        cause: error,
+        details: { providerId, modelId: request.modelId, capability: request.capability },
+    });
+}
 
 function isAbortError(error: unknown) {
     return typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";

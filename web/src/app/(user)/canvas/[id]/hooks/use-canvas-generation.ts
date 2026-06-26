@@ -7,6 +7,7 @@ import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audi
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { uploadImage } from "@/services/image-storage";
 import { defaultProviderClient } from "@/providers";
+import { scanProviderTaskRecovery, TaskStatus, useProviderTaskStore, type ProviderTaskContext } from "@/providers/task-store";
 import { normalizeProviderError } from "@/providers/core/error-normalize";
 import { proxyFetch } from "@/providers/core/proxy-fetch";
 import { isNewProviderEnabled } from "@/providers/feature-flags";
@@ -38,6 +39,7 @@ type CanvasGenerationRequest = {
     originNodeId: string;
     runningNodeId: string;
     controller: AbortController;
+    pendingId?: string;
 };
 
 type MessageApi = {
@@ -50,6 +52,8 @@ type ModalApi = {
 };
 
 type Params = {
+    projectId: string;
+    projectLoaded: boolean;
     effectiveConfig: any;
     isAiConfigReady: (config: any, model: string) => boolean;
     openConfigDialog: (open?: boolean) => void;
@@ -86,7 +90,7 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
     };
 }
 
-async function generateImageResult(config: AiConfig, prompt: string, references: ReferenceImage[], signal: AbortSignal): Promise<{ dataUrl: string | Blob }> {
+async function generateImageResult(config: AiConfig, prompt: string, references: ReferenceImage[], signal: AbortSignal, task?: CanvasProviderTask): Promise<{ dataUrl: string | Blob }> {
     if (shouldUseProvider(config, "image")) {
         const referenceImages = references
             .map(providerReferenceImageUrl)
@@ -97,7 +101,7 @@ async function generateImageResult(config: AiConfig, prompt: string, references:
             count: 1,
             ...(referenceImages.length ? { referenceImages } : {}),
         });
-        const result = await defaultProviderClient.generate(providerIdForParams(providerRequest.params), { ...providerRequest, signal });
+        const result = await defaultProviderClient.generate(providerIdForParams(providerRequest.params), { ...providerRequest, signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
         const image = result.outputs.find((output) => output.type === "image");
         if (image?.dataUrl) return { dataUrl: image.dataUrl };
         if (image?.url) return { dataUrl: await (await proxyFetch(image.url, { signal })).blob() };
@@ -110,14 +114,41 @@ function providerReferenceImageUrl(image: ReferenceImage) {
     return image.url || image.dataUrl;
 }
 
+type CanvasProviderTask = {
+    pendingId: string;
+    taskContext: ProviderTaskContext;
+};
+
+function createProviderTask(projectId: string, nodeId: string, referenceImages: ReferenceImage[] = []): CanvasProviderTask {
+    const unrecoverable = hasUnrecoverableReferenceImages(referenceImages);
+    return {
+        pendingId: nanoid(),
+        taskContext: {
+            projectId,
+            nodeId,
+            referenceImageIds: referenceImages.map((image) => image.storageKey || image.id).filter((id): id is string => Boolean(id)),
+            recoverable: !unrecoverable,
+            unrecoverableReason: unrecoverable ? "参考图没有稳定 storageKey，无法跨刷新恢复" : undefined,
+        },
+    };
+}
+
+function hasUnrecoverableReferenceImages(referenceImages: ReferenceImage[]) {
+    return referenceImages.some((image) => !image.storageKey && (image.dataUrl.startsWith("data:") || image.url?.startsWith("data:")));
+}
+
+function setNodeTaskMetadata(setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>, nodeId: string, pendingId: string, status: TaskStatus) {
+    setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, task: { pendingId, status } } } : node)));
+}
+
 function providerIdForParams(params: { readonly baseUrl?: unknown }) {
     const baseUrl = typeof params.baseUrl === "string" ? params.baseUrl.toLowerCase() : "";
     return baseUrl.includes("grsai") ? "grsai" : "openai-compat";
 }
 
-async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal): Promise<UploadedFile> {
+async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal, task?: CanvasProviderTask): Promise<UploadedFile> {
     if (shouldUseProvider(config, "audio")) {
-        const result = await defaultProviderClient.generate("openai-compat", { ...aiConfigToProviderRequest(config, "audio", { input: prompt }), signal });
+        const result = await defaultProviderClient.generate("openai-compat", { ...aiConfigToProviderRequest(config, "audio", { input: prompt }), signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
         const audio = result.outputs.find((output) => output.type === "audio");
         if (audio?.blob) return storeGeneratedAudio(audio.blob, config.audioFormat);
         if (audio?.url) return storeGeneratedAudio(await (await proxyFetch(audio.url, { signal })).blob(), config.audioFormat);
@@ -143,6 +174,8 @@ function generationErrorMessage(error: unknown) {
 }
 
 export function useCanvasGeneration({
+    projectId,
+    projectLoaded,
     effectiveConfig,
     isAiConfigReady,
     openConfigDialog,
@@ -160,10 +193,10 @@ export function useCanvasGeneration({
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
 
-    const startGenerationRequest = useCallback((targetNodeId: string, originNodeId: string, runningId = originNodeId, controller = new AbortController()) => {
+    const startGenerationRequest = useCallback((targetNodeId: string, originNodeId: string, runningId = originNodeId, controller = new AbortController(), pendingId?: string) => {
         const previous = generationRequestsRef.current.get(targetNodeId);
         if (previous?.controller !== controller) previous?.controller.abort();
-        generationRequestsRef.current.set(targetNodeId, { targetNodeId, originNodeId, runningNodeId: runningId, controller });
+        generationRequestsRef.current.set(targetNodeId, { targetNodeId, originNodeId, runningNodeId: runningId, controller, pendingId });
         return controller;
     }, []);
 
@@ -172,12 +205,23 @@ export function useCanvasGeneration({
         if (request?.controller === controller) generationRequestsRef.current.delete(targetNodeId);
     }, []);
 
+    const abortGenerationForNodeIds = useCallback((nodeIds: Iterable<string>) => {
+        const ids = new Set(nodeIds);
+        generationRequestsRef.current.forEach((request) => {
+            if (!ids.has(request.targetNodeId) && !ids.has(request.originNodeId) && !ids.has(request.runningNodeId)) return;
+            request.controller.abort();
+            generationRequestsRef.current.delete(request.targetNodeId);
+            if (request.pendingId) useProviderTaskStore.getState().cancelTask(request.pendingId, "节点已删除，任务已取消");
+        });
+    }, []);
+
     const stopGenerationByRunningId = useCallback((runningId: string) => {
         const affectedNodeIds = new Set<string>();
         generationRequestsRef.current.forEach((request) => {
             if (request.runningNodeId !== runningId) return;
             request.controller.abort();
             generationRequestsRef.current.delete(request.targetNodeId);
+            if (request.pendingId) useProviderTaskStore.getState().cancelTask(request.pendingId, "用户停止生成");
             affectedNodeIds.add(request.targetNodeId);
             affectedNodeIds.add(request.originNodeId);
         });
@@ -315,14 +359,21 @@ export function useCanvasGeneration({
                     setDialogNodeId(nodeId);
 
                     const controller = runController;
+                    if (shouldUseProvider(generationConfig, "image") && hasUnrecoverableReferenceImages(referenceImages)) message.warning("当前参考图无法跨刷新恢复，刷新后需重新生成");
                     targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, nodeId, controller));
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
                     await Promise.all(
                         targetIds.map(async (targetId) => {
+                            const task = shouldUseProvider(generationConfig, "image") ? createProviderTask(projectId, targetId, referenceImages) : undefined;
+                            if (task) {
+                                useProviderTaskStore.getState().supersedeNodeTasks(projectId, targetId, task.pendingId);
+                                startGenerationRequest(targetId, nodeId, nodeId, controller, task.pendingId);
+                                setNodeTaskMetadata(setNodes, targetId, task.pendingId, TaskStatus.Pending);
+                            }
                             try {
-                                const image = await generateImageResult(generationConfig, effectivePrompt, referenceImages, controller.signal);
+                                const image = await generateImageResult(generationConfig, effectivePrompt, referenceImages, controller.signal, task);
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
@@ -338,12 +389,20 @@ export function useCanvasGeneration({
                                     });
                                 });
                                 hasSuccess = true;
+                                if (task) {
+                                    useProviderTaskStore.getState().markWritten(task.pendingId);
+                                    setNodeTaskMetadata(setNodes, targetId, task.pendingId, TaskStatus.Written);
+                                }
                                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                                 return true;
                             } catch (error) {
-                                if (isCanvasGenerationCanceled(error)) return false;
+                                if (isCanvasGenerationCanceled(error)) {
+                                    if (task) setNodeTaskMetadata(setNodes, targetId, task.pendingId, TaskStatus.Cancelled);
+                                    return false;
+                                }
                                 const errorDetails = generationErrorMessage(error);
                                 hasFailure = true;
+                                if (task) setNodeTaskMetadata(setNodes, targetId, task.pendingId, TaskStatus.Failed);
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
                             } finally {
                                 finishGenerationRequest(targetId, controller);
@@ -416,10 +475,22 @@ export function useCanvasGeneration({
                     pendingChildIds = [audioId];
                     setNodes((prev) => (isEmptyAudioNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...audioNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), audioNode]));
                     if (!isEmptyAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
-                    const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
+                    const task = shouldUseProvider(generationConfig, "audio") ? createProviderTask(projectId, audioId) : undefined;
+                    const controller = startGenerationRequest(audioId, nodeId, nodeId, runController, task?.pendingId);
+                    if (task) {
+                        useProviderTaskStore.getState().supersedeNodeTasks(projectId, audioId, task.pendingId);
+                        setNodeTaskMetadata(setNodes, audioId, task.pendingId, TaskStatus.Pending);
+                    }
                     try {
-                        const audio = await generateAudioResult(generationConfig, effectivePrompt, controller.signal);
+                        const audio = await generateAudioResult(generationConfig, effectivePrompt, controller.signal, task);
                         setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
+                        if (task) {
+                            useProviderTaskStore.getState().markWritten(task.pendingId);
+                            setNodeTaskMetadata(setNodes, audioId, task.pendingId, TaskStatus.Written);
+                        }
+                    } catch (error) {
+                        if (task) setNodeTaskMetadata(setNodes, audioId, task.pendingId, isCanvasGenerationCanceled(error) ? TaskStatus.Cancelled : TaskStatus.Failed);
+                        throw error;
                     } finally {
                         finishGenerationRequest(audioId, controller);
                     }
@@ -490,12 +561,56 @@ export function useCanvasGeneration({
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, projectId, startGenerationRequest],
     );
 
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
     }, [generateNodeRef, handleGenerateNode]);
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        let cancelled = false;
+        const restoreTasks = async () => {
+            const scan = scanProviderTaskRecovery({ projectId, nodeIds: nodesRef.current.map((node) => node.id) });
+            if (scan.issues.length) message.warning("部分刷新前任务无法恢复");
+            if (scan.needsResumeTasks.length) message.warning("部分异步任务需要重新发起生成");
+
+            for (const task of scan.writeBackTasks) {
+                if (cancelled) return;
+                const image = task.result?.outputs.find((output) => output.type === "image");
+                if (!image || image.type !== "image") {
+                    useProviderTaskStore.getState().markUnrecoverable(task.pendingId, "任务结果类型暂不支持恢复写回");
+                    continue;
+                }
+                try {
+                    const imageSource = image.dataUrl && image.dataUrl !== "[data-url-removed]" ? image.dataUrl : image.url ? await (await proxyFetch(image.url)).blob() : null;
+                    if (!imageSource) {
+                        useProviderTaskStore.getState().markUnrecoverable(task.pendingId, "任务结果缺少可恢复图片地址");
+                        continue;
+                    }
+                    const uploaded = await uploadImage(imageSource);
+                    if (cancelled) return;
+                    const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                    const imageSize = fitNodeSize(uploaded.width, uploaded.height, spec.width, spec.height);
+                    setNodes((prev) =>
+                        prev.map((node) => {
+                            if (node.id !== task.nodeId) return node;
+                            const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
+                            return { ...node, position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 }, width: imageSize.width, height: imageSize.height, metadata: { ...node.metadata, ...imageMetadata(uploaded), task: { pendingId: task.pendingId, status: TaskStatus.Written } } };
+                        }),
+                    );
+                    useProviderTaskStore.getState().markWritten(task.pendingId);
+                } catch (error) {
+                    useProviderTaskStore.getState().markUnrecoverable(task.pendingId, generationErrorMessage(error));
+                }
+            }
+        };
+        void restoreTasks();
+        return () => {
+            cancelled = true;
+        };
+    }, [generateNodeRef, message, nodesRef, projectId, projectLoaded, setNodes]);
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
@@ -534,9 +649,15 @@ export function useCanvasGeneration({
             }
             const retryImages = retryReferenceImages || [];
 
+            const retryTask = (node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image")) || (node.type === CanvasNodeType.Audio && shouldUseProvider(generationConfig, "audio")) ? createProviderTask(projectId, node.id, node.type === CanvasNodeType.Image ? retryImages : []) : undefined;
+            if (retryTask && node.type === CanvasNodeType.Image && hasUnrecoverableReferenceImages(retryImages)) message.warning("当前参考图无法跨刷新恢复，刷新后需重新生成");
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
-            const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
+            const controller = startGenerationRequest(node.id, sourceNode.id, node.id, undefined, retryTask?.pendingId);
+            if (retryTask) {
+                useProviderTaskStore.getState().supersedeNodeTasks(projectId, node.id, retryTask.pendingId);
+                setNodeTaskMetadata(setNodes, node.id, retryTask.pendingId, TaskStatus.Pending);
+            }
 
             try {
                 if (node.type === CanvasNodeType.Text) {
@@ -556,12 +677,16 @@ export function useCanvasGeneration({
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const audio = await generateAudioResult(generationConfig, prompt, controller.signal);
+                    const audio = await generateAudioResult(generationConfig, prompt, controller.signal, retryTask);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
+                    if (retryTask) {
+                        useProviderTaskStore.getState().markWritten(retryTask.pendingId);
+                        setNodeTaskMetadata(setNodes, node.id, retryTask.pendingId, TaskStatus.Written);
+                    }
                     return;
                 }
 
-                const image = await generateImageResult(generationConfig, prompt, useReferenceImages ? retryImages : [], controller.signal);
+                const image = await generateImageResult(generationConfig, prompt, useReferenceImages ? retryImages : [], controller.signal, retryTask);
                 const uploadedImage = await uploadImage(image.dataUrl);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
@@ -575,9 +700,17 @@ export function useCanvasGeneration({
                             : item,
                     ),
                 );
+                if (retryTask) {
+                    useProviderTaskStore.getState().markWritten(retryTask.pendingId);
+                    setNodeTaskMetadata(setNodes, node.id, retryTask.pendingId, TaskStatus.Written);
+                }
             } catch (error) {
-                if (isCanvasGenerationCanceled(error)) return;
+                if (isCanvasGenerationCanceled(error)) {
+                    if (retryTask) setNodeTaskMetadata(setNodes, node.id, retryTask.pendingId, TaskStatus.Cancelled);
+                    return;
+                }
                 const errorDetails = generationErrorMessage(error);
+                if (retryTask) setNodeTaskMetadata(setNodes, node.id, retryTask.pendingId, TaskStatus.Failed);
                 message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
@@ -585,7 +718,7 @@ export function useCanvasGeneration({
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, projectId, startGenerationRequest],
     );
 
     const generateImageFromTextNode = useCallback(
@@ -617,5 +750,5 @@ export function useCanvasGeneration({
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message],
     );
 
-    return { runningNodeId, setRunningNodeId, startGenerationRequest, finishGenerationRequest, confirmStopGeneration, handleGenerateNode, handleRetryNode, generateImageFromTextNode };
+    return { runningNodeId, setRunningNodeId, startGenerationRequest, finishGenerationRequest, abortGenerationForNodeIds, confirmStopGeneration, handleGenerateNode, handleRetryNode, generateImageFromTextNode };
 }
