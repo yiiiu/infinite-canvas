@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, message } from "antd";
+import { Alert } from "antd";
 import { ServerCog } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -21,10 +21,8 @@ export function ProviderSettingsSection() {
     const updateProfile = useProviderConfigStore((state) => state.updateProfile);
     const setProfileEnabled = useProviderConfigStore((state) => state.setProfileEnabled);
     const removeProfile = useProviderConfigStore((state) => state.removeProfile);
-    const refreshProfileModels = useProviderConfigStore((state) => state.refreshProfileModels);
     const [selectedProfileId, setSelectedProfileId] = useState("");
     const [creating, setCreating] = useState(false);
-    const [creatingProviderId, setCreatingProviderId] = useState("");
     const profiles = useMemo(() => Object.values(profilesMap), [profilesMap]);
     const providerOptions = useMemo<ProviderOption[]>(
         () =>
@@ -39,25 +37,11 @@ export function ProviderSettingsSection() {
     const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
     const activeProfile = creating ? undefined : selectedProfile || profiles[0];
     const formCreating = creating || !activeProfile;
-    const activeKey = formCreating ? `new:${creatingProviderId || "default"}` : activeProfile.id;
+    const activeKey = formCreating ? "new" : activeProfile.id;
 
-    const startCreate = (providerId = "") => {
-        setCreatingProviderId(providerId);
+    const startCreate = () => {
         setCreating(true);
         setSelectedProfileId("");
-    };
-
-    const refreshModels = (profileId: string, showSuccess = true) => {
-        const profile = useProviderConfigStore.getState().profiles[profileId];
-        if (!profile?.providerId || !defaultProviderRegistry.get(profile.providerId)?.listModels) return Promise.resolve();
-        return refreshProfileModels(profileId).then(() => {
-            const result = useProviderConfigStore.getState().getProfileModels(profileId);
-            if (result.error) {
-                message.warning("模型列表加载失败");
-                return;
-            }
-            if (showSuccess) message.success(`已加载 ${result.models.length} 个模型`);
-        });
     };
 
     const saveProfile = (value: ProfileFormValue) => {
@@ -65,14 +49,11 @@ export function ProviderSettingsSection() {
             const profile = createProfile({ ...value, enabled: true, models: [] });
             setSelectedProfileId(profile.id);
             setCreating(false);
-            setCreatingProviderId("");
-            refreshModels(profile.id);
             return;
         }
         if (!activeProfile) return;
         updateProfile(activeProfile.id, value);
         setSelectedProfileId(activeProfile.id);
-        refreshModels(activeProfile.id);
     };
 
     const deleteProfile = (profileId: string) => {
@@ -88,13 +69,13 @@ export function ProviderSettingsSection() {
                         <ServerCog className="size-5" />
                         AI 服务商
                     </div>
-                    <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">管理服务商配置档，并在“默认模型”中按能力配置默认模型。</div>
+                    <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">管理 Provider Profile，并在“默认模型”中按能力配置默认模型。</div>
                 </div>
             </div>
-            <Alert type="info" showIcon message="配置档只保存连接信息" description="业务默认模型请到“默认模型”页面按能力配置。" />
+            <Alert type="info" showIcon message="Profile 只保存连接信息" description="业务默认模型请到“默认模型”section 按能力配置。" />
             <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-4">
-                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); setCreatingProviderId(""); }} onToggle={setProfileEnabled} onDelete={deleteProfile} onRefreshModels={(profileId) => refreshModels(profileId, true)} />
-                <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} initialProviderId={creatingProviderId} onSave={saveProfile} onCancelCreate={creating ? () => { setCreating(false); setCreatingProviderId(""); } : undefined} />
+                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); }} onToggle={setProfileEnabled} onDelete={deleteProfile} />
+                <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} onSave={saveProfile} onCancelCreate={creating ? () => setCreating(false) : undefined} />
             </div>
         </div>
     );
@@ -109,7 +90,7 @@ function buildGroups(profiles: readonly ProviderProfile[], providerOptions: read
     const providerIds = new Set([...providerOptions.map((option) => option.id), ...profiles.map((profile) => profile.providerId || "unknown")]);
     return Array.from(providerIds).map((providerId) => ({
         providerId,
-        label: labels.get(providerId) || "未配置服务商",
+        label: labels.get(providerId) || "未配置 Provider",
         profiles: profiles
             .filter((profile) => (profile.providerId || "unknown") === providerId)
             .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
