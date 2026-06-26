@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { useProviderConfigStore } from "../../config";
 import { createProviderClient } from "../../core/client";
 import { createProviderRegistry } from "../../core/registry";
 import { ProviderError, ProviderErrorCode, type ProviderFetch } from "../../core/types";
@@ -104,6 +105,95 @@ test("normalizes image generation errors as ProviderError", async () => {
                 },
                 signal: undefined,
             }),
-        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.NetworkError && error.message === "bad api key",
+        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.Unauthorized && error.message === "bad api key",
+    );
+});
+
+test("lists OpenAI compatible models through ProviderClient", async () => {
+    useProviderConfigStore.getState().resetProviderConfig();
+    useProviderConfigStore.setState({
+        profiles: {
+            "profile-openai": {
+                id: "profile-openai",
+                name: "OpenAI Profile",
+                providerId: "openai-compat",
+                enabled: true,
+                auth: { baseUrl: "https://example.test", apiKey: "test-key" },
+                models: [],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+    });
+
+    const fetchMock: ProviderFetch = async (url, init) => {
+        assert.equal(String(url), "https://example.test/v1/models");
+        assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-key");
+        return new Response(JSON.stringify({ data: [{ id: "gpt-image-1", object: "model" }, { id: "tts-1", name: "TTS 1" }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+        });
+    };
+
+    const result = await createClient(fetchMock).listModels("openai-compat", "profile-openai");
+
+    assert.equal(result.source, "remote");
+    assert.deepEqual(result.models.map((item) => item.id), ["gpt-image-1", "tts-1"]);
+    assert.equal(result.models[1]?.name, "TTS 1");
+});
+
+test("maps OpenAI compatible listModels 401 to Unauthorized ProviderError", async () => {
+    useProviderConfigStore.getState().resetProviderConfig();
+    useProviderConfigStore.setState({
+        profiles: {
+            "profile-openai": {
+                id: "profile-openai",
+                name: "OpenAI Profile",
+                providerId: "openai-compat",
+                enabled: true,
+                auth: { baseUrl: "https://example.test", apiKey: "bad-key" },
+                models: [],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+    });
+
+    const fetchMock: ProviderFetch = async () =>
+        new Response(JSON.stringify({ error: { message: "bad api key" } }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+        });
+
+    await assert.rejects(
+        () => createClient(fetchMock).listModels("openai-compat", "profile-openai"),
+        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.Unauthorized && error.message === "bad api key",
+    );
+});
+
+test("maps OpenAI compatible listModels network failures to NetworkError", async () => {
+    useProviderConfigStore.getState().resetProviderConfig();
+    useProviderConfigStore.setState({
+        profiles: {
+            "profile-openai": {
+                id: "profile-openai",
+                name: "OpenAI Profile",
+                providerId: "openai-compat",
+                enabled: true,
+                auth: { baseUrl: "https://example.test", apiKey: "test-key" },
+                models: [],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+    });
+
+    const fetchMock: ProviderFetch = async () => {
+        throw new Error("fetch failed");
+    };
+
+    await assert.rejects(
+        () => createClient(fetchMock).listModels("openai-compat", "profile-openai"),
+        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.NetworkError && error.message === "fetch failed",
     );
 });

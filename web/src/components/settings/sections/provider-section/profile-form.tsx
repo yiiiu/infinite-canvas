@@ -27,12 +27,13 @@ type ProfileFormProps = {
     profile?: ProviderProfile;
     profiles: readonly ProviderProfile[];
     providerOptions: readonly ProviderOption[];
+    initialProviderId?: string;
     onSave: (value: ProfileFormValue) => void;
     onCancelCreate?: () => void;
 };
 
-export function ProfileForm({ profile, profiles, providerOptions, onSave, onCancelCreate }: ProfileFormProps) {
-    const firstProviderId = providerOptions[0]?.id || "";
+export function ProfileForm({ profile, profiles, providerOptions, initialProviderId, onSave, onCancelCreate }: ProfileFormProps) {
+    const firstProviderId = initialProviderId || providerOptions[0]?.id || "";
     const [providerId, setProviderId] = useState(profile?.providerId || firstProviderId);
     const [name, setName] = useState(profile?.name || "");
     const [auth, setAuth] = useState<Record<string, string>>({});
@@ -73,22 +74,22 @@ export function ProfileForm({ profile, profiles, providerOptions, onSave, onCanc
     };
 
     if (!provider) {
-        return <div className="rounded-xl border border-dashed border-stone-300 p-8 text-center text-sm text-stone-400 dark:border-stone-700">暂无可用 Provider</div>;
+        return <div className="rounded-xl border border-dashed border-stone-300 p-8 text-center text-sm text-stone-400 dark:border-stone-700">暂无可用服务商</div>;
     }
 
     return (
         <div className="flex h-full min-h-0 flex-col rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950">
             <div className="border-b border-stone-200 px-5 py-4 dark:border-stone-800">
-                <div className="text-base font-semibold text-stone-950 dark:text-stone-100">{creating ? "新增 Profile" : "编辑 Profile"}</div>
-                <div className="mt-1 text-xs text-stone-400">配置只保存到 Provider Profile，不切换当前生成链路</div>
+                <div className="text-base font-semibold text-stone-950 dark:text-stone-100">{creating ? "新增配置档" : "编辑配置档"}</div>
+                <div className="mt-1 text-xs text-stone-400">连接信息只保存到配置档，默认模型请到“默认模型”页面选择</div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
                 <div className="grid gap-4">
                     <label className="grid gap-1.5 text-sm">
-                        <span className="font-medium text-stone-700 dark:text-stone-200">Provider</span>
+                        <span className="font-medium text-stone-700 dark:text-stone-200">服务商</span>
                         <Select value={providerId || undefined} onValueChange={updateProvider} disabled={!creating}>
                             <SelectTrigger className="h-9 w-full bg-white dark:bg-stone-900">
-                                <SelectValue placeholder="选择 Provider" />
+                                <SelectValue placeholder="选择服务商" />
                             </SelectTrigger>
                             <SelectContent>
                                 {providerOptions.map((option) => (

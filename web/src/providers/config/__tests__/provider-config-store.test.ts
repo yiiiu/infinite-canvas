@@ -37,6 +37,33 @@ test("returns null when default profile is disabled", () => {
     assert.equal(useProviderConfigStore.getState().getEffectiveDefault("image"), null);
 });
 
+test("setDefault writes and clears defaults without changing legacy mode", () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+
+    useProviderConfigStore.getState().setDefault("text", { profileId: profile.id, modelId: "gpt-4.1" });
+    useProviderConfigStore.getState().setDefault("image", { profileId: profile.id, modelId: "gpt-image-1" });
+    useProviderConfigStore.getState().setDefault("video", { profileId: profile.id, modelId: "sora" });
+    useProviderConfigStore.getState().setDefault("audio", { profileId: profile.id, modelId: "gpt-4o-mini-tts" });
+
+    assert.equal(useProviderConfigStore.getState().mode, "legacy");
+    assert.deepEqual(useProviderConfigStore.getState().getEffectiveDefault("image"), { profileId: profile.id, modelId: "gpt-image-1" });
+
+    useProviderConfigStore.getState().setDefault("image", null);
+    assert.equal(useProviderConfigStore.getState().mode, "legacy");
+    assert.equal(useProviderConfigStore.getState().getEffectiveDefault("image"), null);
+});
+
+test("setDefault does not change an existing profiles mode", () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+
+    useProviderConfigStore.getState().setMode("profiles");
+    useProviderConfigStore.getState().setDefault("audio", { profileId: profile.id, modelId: "gpt-4o-mini-tts" });
+    useProviderConfigStore.getState().setDefault("audio", null);
+
+    assert.equal(useProviderConfigStore.getState().mode, "profiles");
+    assert.equal(useProviderConfigStore.getState().getEffectiveDefault("audio"), null);
+});
+
 test("validates provider manifest auth fields", () => {
     const errors = collectManifestErrors({
         id: "test",

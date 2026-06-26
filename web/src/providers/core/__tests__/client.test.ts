@@ -88,6 +88,68 @@ test("does not create task records without pendingId", async () => {
     assert.deepEqual(useProviderTaskStore.getState().listProjectTasks("project-1"), []);
 });
 
+test("listModels returns remote data when adapter implements it", async () => {
+    const registry = createProviderRegistry();
+    const fetchMock: ProviderFetch = async () => new Response("ok");
+    registry.register({
+        manifest,
+        async generate() {
+            throw new Error("should not generate");
+        },
+        async listModels(context) {
+            assert.equal(context.fetch, fetchMock);
+            assert.equal(context.responseMode, "sync");
+            return { source: "remote", models: [{ id: "remote-model", name: "Remote Model" }] };
+        },
+    });
+
+    const client = createProviderClient({ registry, context: { fetch: fetchMock } });
+    const result = await client.listModels("mock");
+
+    assert.deepEqual(result, { source: "remote", models: [{ id: "remote-model", name: "Remote Model" }] });
+});
+
+test("listModels falls back to manifest models when adapter does not implement it", async () => {
+    const registry = createProviderRegistry();
+    registry.register({
+        manifest,
+        async generate() {
+            throw new Error("should not generate");
+        },
+    });
+
+    const client = createProviderClient({ registry });
+    const result = await client.listModels("mock");
+
+    assert.equal(result.source, "manifest");
+    assert.deepEqual(
+        result.models.map((item) => ({ id: item.id, capability: item.capability })),
+        [
+            { id: "mock-text", capability: "text" },
+            { id: "mock-image", capability: "image" },
+        ],
+    );
+});
+
+test("listModels passes ProviderError through", async () => {
+    const registry = createProviderRegistry();
+    registry.register({
+        manifest,
+        async generate() {
+            throw new Error("should not generate");
+        },
+        async listModels() {
+            throw new ProviderError(ProviderErrorCode.Unauthorized, "bad key");
+        },
+    });
+
+    const client = createProviderClient({ registry });
+
+    await assert.rejects(
+        () => client.listModels("mock"),
+        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.Unauthorized && error.message === "bad key",
+    );
+});
 test("throws ProviderError when provider is missing", async () => {
     const client = createProviderClient({ registry: createProviderRegistry() });
 

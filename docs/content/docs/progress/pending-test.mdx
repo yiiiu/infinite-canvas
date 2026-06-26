@@ -5,7 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
-- Provider 管理设置面板：顶部导航和移动端导航新增“设置”入口；设置弹窗内提供“AI 服务商”section，可新增、编辑、删除、启停 Provider Profile，并按 Provider manifest 动态渲染认证字段；当前不会切换业务调用模式。
+- Provider 模型列表 SDK：ProviderClient 新增 `listModels(providerId, profileId?)`，OpenAI Compatible 可通过 Profile 认证调用 `/v1/models` 拉取远程模型；未实现远程列表的 Provider 会回退到 manifest 声明模型。
+- Provider 管理设置面板：顶部导航和移动端导航新增“设置”入口；设置弹窗内提供“AI 服务商”和“默认模型”section，可新增、编辑、删除、启停 Provider Profile；默认模型页面以文本、图片、视频、音频四行表格配置默认 Profile 和模型，支持自动保存、首次启用提示，以及通过“浏览模型”弹窗搜索并选择远程或 manifest 模型。
 - Provider 任务生命周期：生成任务会记录到本地 TaskStore，支持刷新后识别待写回/不可恢复任务；删除节点会中断关联请求并清理任务；参考图无法跨刷新恢复时会给出降级提示。
 - Codex App 插件文档：新增插件安装教程，区分 AI 自动安装、手动安装和本仓库开发调试安装；同步优化插件 README 与技能说明。
 - 配置与用户偏好：每个模型渠道新增 OpenAI / Gemini 调用格式选择，默认 OpenAI，切换默认格式时同步更新默认 Base URL；渠道 Tab 增加紧凑醒目的提醒，说明模型是否可选需要到“模型”Tab 选择。

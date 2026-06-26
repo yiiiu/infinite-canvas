@@ -1,10 +1,12 @@
+import { useProviderConfigStore } from "../config";
 import { useProviderTaskStore } from "../task-store";
 import { proxyFetch } from "./proxy-fetch";
 import { providerRegistry, type ProviderRegistry } from "./registry";
-import { ProviderError, ProviderErrorCode, type AdapterContext, type GenerateRequest, type GenerateResult, type JsonObject, type ProviderAdapter, type ProviderCapability } from "./types";
+import { ProviderError, ProviderErrorCode, type AdapterContext, type GenerateRequest, type GenerateResult, type JsonObject, type ModelListResult, type ProviderAdapter, type ProviderCapability } from "./types";
 
 export type ProviderClient = {
     generate: <TParams extends JsonObject = JsonObject>(providerId: string, request: GenerateRequest<TParams>) => Promise<GenerateResult>;
+    listModels: (providerId: string, profileId?: string) => Promise<ModelListResult>;
 };
 
 export type ProviderClientOptions = {
@@ -67,6 +69,65 @@ export function createProviderClient(options: ProviderClientOptions = {}): Provi
                 throw providerError;
             }
         },
+
+        async listModels(providerId, profileId) {
+            const adapter = registry.get(providerId);
+            if (!adapter) {
+                throw new ProviderError(ProviderErrorCode.ProviderNotFound, `Provider 未注册：${providerId}`, {
+                    details: { providerId },
+                });
+            }
+
+            const context: AdapterContext = {
+                ...baseContext,
+                responseMode: adapter.manifest.responseMode,
+                auth: profileId ? profileAuth(providerId, profileId) : undefined,
+            };
+
+            if (!adapter.listModels) return manifestModelList(adapter);
+
+            try {
+                return await adapter.listModels(context);
+            } catch (error) {
+                if (error instanceof ProviderError) throw error;
+                throw new ProviderError(ProviderErrorCode.AdapterError, error instanceof Error ? error.message : "Provider 模型列表读取失败", {
+                    cause: error,
+                    details: { providerId, ...(profileId ? { profileId } : {}) },
+                });
+            }
+        },
+    };
+}
+
+function manifestModelList(adapter: ProviderAdapter): ModelListResult {
+    return {
+        source: "manifest",
+        models: (adapter.manifest.models || []).flatMap((model) =>
+            model.capabilities.map((capability) => ({
+                id: model.id,
+                ...(model.name ? { name: model.name } : {}),
+                capability,
+                raw: model,
+            })),
+        ),
+    };
+}
+
+function profileAuth(providerId: string, profileId: string): JsonObject {
+    const profile = useProviderConfigStore.getState().profiles[profileId];
+    if (!profile) {
+        throw new ProviderError(ProviderErrorCode.InvalidRequest, `Provider Profile 不存在：${profileId}`, { details: { providerId, profileId } });
+    }
+    if (profile.enabled === false) {
+        throw new ProviderError(ProviderErrorCode.InvalidRequest, `Provider Profile 已禁用：${profile.name}`, { details: { providerId, profileId } });
+    }
+    if (profile.providerId && profile.providerId !== providerId) {
+        throw new ProviderError(ProviderErrorCode.InvalidRequest, `Provider Profile 不属于 ${providerId}`, { details: { providerId, profileId, profileProviderId: profile.providerId } });
+    }
+    return {
+        ...(profile.auth || {}),
+        ...(profile.baseUrl ? { baseUrl: profile.baseUrl } : {}),
+        ...(profile.apiKey ? { apiKey: profile.apiKey } : {}),
     };
 }
 

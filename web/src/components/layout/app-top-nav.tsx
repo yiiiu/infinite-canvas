@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, ServerCog } from "lucide-react";
+import { Boxes, Menu, ServerCog } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,6 +9,7 @@ import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { SettingsModal } from "@/components/settings/settings-modal";
+import { DefaultsSettingsSection } from "@/components/settings/sections/defaults-section";
 import { ProviderSettingsSection } from "@/components/settings/sections/provider-section";
 import type { SettingsSection } from "@/components/settings/types";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ import { useState } from "react";
 
 const settingsSections: SettingsSection[] = [
     { id: "providers", title: "AI 服务商", icon: <ServerCog className="size-4" />, component: ProviderSettingsSection },
+    { id: "defaults", title: "默认模型", icon: <Boxes className="size-4" />, component: DefaultsSettingsSection },
 ];
 
 export function AppTopNav() {

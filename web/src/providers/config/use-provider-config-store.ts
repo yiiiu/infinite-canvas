@@ -27,6 +27,7 @@ type ProviderConfigStore = ProviderConfigData & {
     setProfileEnabled: (profileId: string, enabled: boolean) => void;
     upsertProfile: (profile: ProviderProfile) => void;
     removeProfile: (profileId: string) => void;
+    setDefault: (capability: ProviderConfigCapability, value: ProviderModelSelection | null) => void;
     setDefaultSelection: (capability: ProviderConfigCapability, selection: ProviderModelSelection | undefined) => void;
     getProfile: (profileId: string) => ProviderProfile | undefined;
     getEffectiveDefault: (capability: ProviderConfigCapability) => ProviderModelSelection | null;
@@ -105,12 +106,13 @@ export const useProviderConfigStore = create<ProviderConfigStore>()(
                     profiles: Object.fromEntries(Object.entries(state.profiles).filter(([id]) => id !== profileId)),
                     defaults: Object.fromEntries(Object.entries(state.defaults).filter(([, selection]) => selection?.profileId !== profileId)),
                 })),
-            setDefaultSelection: (capability, selection) =>
+            setDefault: (capability, value) =>
                 set((state) => ({
-                    defaults: selection
-                        ? { ...state.defaults, [capability]: selection }
+                    defaults: value
+                        ? { ...state.defaults, [capability]: value }
                         : Object.fromEntries(Object.entries(state.defaults).filter(([key]) => key !== capability)),
                 })),
+            setDefaultSelection: (capability, selection) => get().setDefault(capability, selection ?? null),
             getProfile: (profileId) => get().profiles[profileId],
             getEffectiveDefault: (capability) => {
                 const selection = get().defaults[capability];

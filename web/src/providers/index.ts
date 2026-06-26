@@ -23,4 +23,4 @@ if (typeof window !== "undefined") {
 
 export { grsaiAdapter, grsaiManifest } from "./grsai/adapter";
 export { openAICompatAdapter, openAICompatManifest } from "./openai-compat/adapter";
-export type { ProviderAdapter, ProviderCapability, ProviderManifest } from "./core/types";
+export type { ModelInfo, ModelListResult, ProviderAdapter, ProviderCapability, ProviderManifest } from "./core/types";

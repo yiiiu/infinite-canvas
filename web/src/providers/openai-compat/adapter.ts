@@ -1,5 +1,5 @@
 import { pollUntil } from "../core/polling";
-import { ProviderError, ProviderErrorCode, type AdapterContext, type GenerateRequest, type GenerateResult, type JsonObject, type ProviderAdapter, type ProviderManifest, type ProviderOutput } from "../core/types";
+import { ProviderError, ProviderErrorCode, type AdapterContext, type GenerateRequest, type GenerateResult, type JsonObject, type ModelListResult, type ProviderAdapter, type ProviderManifest, type ProviderOutput } from "../core/types";
 import manifest from "./manifest.json";
 
 export const openAICompatManifest = manifest as ProviderManifest;
@@ -15,6 +15,17 @@ export const openAICompatAdapter: ProviderAdapter = {
     async testConnection(request, context) {
         await getJson(context, request.auth, "/models", request.signal);
         return { ok: true, message: "连接可用" };
+    },
+    async listModels(context) {
+        const auth = context.auth;
+        if (!auth) throw new ProviderError(ProviderErrorCode.InvalidRequest, "缺少 Provider Profile 认证配置");
+        try {
+            const payload = await getJson(context, auth, "/models", undefined);
+            return openAIModelList(payload);
+        } catch (error) {
+            if (error instanceof ProviderError) throw error;
+            throw new ProviderError(ProviderErrorCode.NetworkError, error instanceof Error ? error.message : "OpenAI Compatible 模型列表请求失败", { cause: error });
+        }
     },
 };
 
@@ -193,7 +204,15 @@ async function getJson(context: AdapterContext, params: JsonObject, path: string
 async function assertOk(response: Response) {
     if (response.ok) return;
     const payload = await readJson(response);
-    throw new ProviderError(ProviderErrorCode.NetworkError, errorMessage(payload) || `Provider 请求失败：${response.status}`, { details: { status: response.status } });
+    throw new ProviderError(errorCode(response.status), errorMessage(payload) || `Provider 请求失败：${response.status}`, { details: { status: response.status } });
+}
+
+function errorCode(status: number) {
+    if (status === 401 || status === 403) return ProviderErrorCode.Unauthorized;
+    if (status === 429) return ProviderErrorCode.RateLimited;
+    if (status === 402) return ProviderErrorCode.InsufficientBalance;
+    if (status === 400 || status === 422) return ProviderErrorCode.InvalidRequest;
+    return ProviderErrorCode.NetworkError;
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -204,6 +223,19 @@ async function readJson(response: Response): Promise<unknown> {
     } catch {
         return text;
     }
+}
+
+function openAIModelList(payload: unknown): ModelListResult {
+    if (!isRecord(payload) || !Array.isArray(payload.data)) {
+        throw new ProviderError(ProviderErrorCode.AdapterError, "模型列表响应格式无效");
+    }
+    return {
+        source: "remote",
+        models: payload.data.flatMap((item) => {
+            if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim()) return [];
+            return [{ id: item.id.trim(), ...(typeof item.name === "string" && item.name.trim() ? { name: item.name.trim() } : {}), raw: item }];
+        }),
+    };
 }
 
 function imageOutputs(payload: unknown): ProviderOutput[] {

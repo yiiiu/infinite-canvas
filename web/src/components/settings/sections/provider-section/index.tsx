@@ -23,6 +23,7 @@ export function ProviderSettingsSection() {
     const removeProfile = useProviderConfigStore((state) => state.removeProfile);
     const [selectedProfileId, setSelectedProfileId] = useState("");
     const [creating, setCreating] = useState(false);
+    const [creatingProviderId, setCreatingProviderId] = useState("");
     const profiles = useMemo(() => Object.values(profilesMap), [profilesMap]);
     const providerOptions = useMemo<ProviderOption[]>(
         () =>
@@ -37,9 +38,10 @@ export function ProviderSettingsSection() {
     const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
     const activeProfile = creating ? undefined : selectedProfile || profiles[0];
     const formCreating = creating || !activeProfile;
-    const activeKey = formCreating ? "new" : activeProfile.id;
+    const activeKey = formCreating ? `new:${creatingProviderId || "default"}` : activeProfile.id;
 
-    const startCreate = () => {
+    const startCreate = (providerId = "") => {
+        setCreatingProviderId(providerId);
         setCreating(true);
         setSelectedProfileId("");
     };
@@ -49,6 +51,7 @@ export function ProviderSettingsSection() {
             const profile = createProfile({ ...value, enabled: true, models: [] });
             setSelectedProfileId(profile.id);
             setCreating(false);
+            setCreatingProviderId("");
             return;
         }
         if (!activeProfile) return;
@@ -69,13 +72,13 @@ export function ProviderSettingsSection() {
                         <ServerCog className="size-5" />
                         AI 服务商
                     </div>
-                    <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">管理 Provider Profile。本阶段不会切换当前业务调用模式。</div>
+                    <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">管理服务商配置档，并在“默认模型”中按能力配置默认模型。</div>
                 </div>
             </div>
-            <Alert type="info" showIcon message="当前仍使用旧配置生成" description="这里保存的是新的 Provider Profile，业务调用点会在下一阶段接入。" />
+            <Alert type="info" showIcon message="配置档只保存连接信息" description="业务默认模型请到“默认模型”页面按能力配置。" />
             <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-4">
-                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); }} onToggle={setProfileEnabled} onDelete={deleteProfile} />
-                <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} onSave={saveProfile} onCancelCreate={creating ? () => setCreating(false) : undefined} />
+                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); setCreatingProviderId(""); }} onToggle={setProfileEnabled} onDelete={deleteProfile} />
+                <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} initialProviderId={creatingProviderId} onSave={saveProfile} onCancelCreate={creating ? () => { setCreating(false); setCreatingProviderId(""); } : undefined} />
             </div>
         </div>
     );
@@ -90,7 +93,7 @@ function buildGroups(profiles: readonly ProviderProfile[], providerOptions: read
     const providerIds = new Set([...providerOptions.map((option) => option.id), ...profiles.map((profile) => profile.providerId || "unknown")]);
     return Array.from(providerIds).map((providerId) => ({
         providerId,
-        label: labels.get(providerId) || "未配置 Provider",
+        label: labels.get(providerId) || "未配置服务商",
         profiles: profiles
             .filter((profile) => (profile.providerId || "unknown") === providerId)
             .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),

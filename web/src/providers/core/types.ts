@@ -117,6 +117,18 @@ export type GenerateResult = {
     readonly metadata?: JsonObject;
 };
 
+export type ModelInfo = {
+    readonly id: string;
+    readonly name?: string;
+    readonly capability?: ProviderCapability;
+    readonly raw?: unknown;
+};
+
+export type ModelListResult = {
+    readonly models: ModelInfo[];
+    readonly source: "remote" | "manifest";
+};
+
 export type ProviderFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
 export type AdapterContext = {
@@ -124,6 +136,7 @@ export type AdapterContext = {
     readonly now: () => Date;
     readonly responseMode: ProviderResponseMode;
     readonly pendingId?: string;
+    readonly auth?: JsonObject;
     readonly updateTask?: (patch: ProviderTaskUpdate) => void | Promise<void>;
 };
 
@@ -141,6 +154,7 @@ export type ProviderConnectionTestResult = {
 export type ProviderAdapter = {
     readonly manifest: ProviderManifest;
     generate<TParams extends JsonObject = JsonObject>(request: GenerateRequest<TParams>, context: AdapterContext): Promise<GenerateResult>;
+    listModels?: (context: AdapterContext) => Promise<ModelListResult>;
     testConnection?: (request: ProviderConnectionTestRequest, context: AdapterContext) => Promise<ProviderConnectionTestResult>;
 };
 
