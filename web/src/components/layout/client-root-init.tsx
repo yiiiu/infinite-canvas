@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { App } from "antd";
 
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
+import { useProviderConfigStore } from "@/providers/config";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
@@ -12,6 +13,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const config = useConfigStore((state) => state.config);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const migrateProviderConfig = useProviderConfigStore((state) => state.migrateFromAiConfig);
 
     useEffect(() => {
         if (handledConfigParams.current) return;
@@ -45,6 +47,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         openConfigDialog(false);
         message.success("已导入本地直连配置");
     }, [config.channels, message, openConfigDialog, updateConfig]);
+
+    useEffect(() => {
+        migrateProviderConfig(config);
+    }, [config, migrateProviderConfig]);
 
     return <>{children}</>;
 }

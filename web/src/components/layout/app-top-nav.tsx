@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { Menu, ServerCog } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -8,12 +8,20 @@ import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-
 import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
+import { SettingsModal } from "@/components/settings/settings-modal";
+import { ProviderSettingsSection } from "@/components/settings/sections/provider-section";
+import type { SettingsSection } from "@/components/settings/types";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+
+const settingsSections: SettingsSection[] = [
+    { id: "providers", title: "AI 服务商", icon: <ServerCog className="size-4" />, component: ProviderSettingsSection },
+];
 
 export function AppTopNav() {
     const pathname = usePathname();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const hideHeader = /^\/canvas\/[^/]+/.test(pathname);
     const slug = pathname.split("/").filter(Boolean)[0];
     const activeToolSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
@@ -69,13 +77,14 @@ export function AppTopNav() {
                         </div>
 
                         <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">
-                            <UserStatusActions />
+                            <UserStatusActions onOpenSettings={() => setSettingsOpen(true)} />
                         </div>
                     </div>
                 </header>
             ) : null}
 
-            <MobileNavDrawer open={mobileNavOpen} activeToolSlug={activeToolSlug} onClose={() => setMobileNavOpen(false)} />
+            <MobileNavDrawer open={mobileNavOpen} activeToolSlug={activeToolSlug} onOpenSettings={() => setSettingsOpen(true)} onClose={() => setMobileNavOpen(false)} />
+            <SettingsModal open={settingsOpen} sections={settingsSections} onOpenChange={setSettingsOpen} />
             <AppConfigModal />
         </>
     );

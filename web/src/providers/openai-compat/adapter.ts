@@ -12,6 +12,10 @@ export const openAICompatAdapter: ProviderAdapter = {
         if (request.capability === "video") return generateVideo(request, context);
         throw new ProviderError(ProviderErrorCode.UnsupportedCapability, `OpenAI Compatible 不支持 ${request.capability}`, { details: { capability: request.capability } });
     },
+    async testConnection(request, context) {
+        await getJson(context, request.auth, "/models", request.signal);
+        return { ok: true, message: "连接可用" };
+    },
 };
 
 type VideoTask = {

@@ -5,6 +5,11 @@
   "description": "GrsAI 图像生成 Provider，支持图生图与参考图编辑。",
   "responseMode": "sync",
   "capabilities": ["image"],
+  "auth": {
+    "fields": [
+      { "key": "apiKey", "type": "password", "label": "API Key", "placeholder": "grsai key", "required": true }
+    ]
+  },
   "allowsCustomModels": false,
   "models": [
     {

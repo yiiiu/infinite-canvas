@@ -1,6 +1,7 @@
-import { PROVIDER_CAPABILITIES, PROVIDER_RESPONSE_MODES, ProviderError, ProviderErrorCode, type JsonSchema, type JsonSchemaType, type JsonValue, type ProviderCapability, type ProviderManifest, type ProviderModel, type ProviderResponseMode } from "./types";
+import { PROVIDER_CAPABILITIES, PROVIDER_RESPONSE_MODES, ProviderError, ProviderErrorCode, type AuthFieldType, type JsonSchema, type JsonSchemaType, type JsonValue, type ProviderCapability, type ProviderManifest, type ProviderModel, type ProviderResponseMode } from "./types";
 
 const JSON_SCHEMA_TYPES = new Set<JsonSchemaType>(["string", "number", "integer", "boolean", "object", "array", "null"]);
+const AUTH_FIELD_TYPES = new Set<AuthFieldType>(["string", "password", "select", "textarea"]);
 const PROVIDER_CAPABILITY_SET = new Set<ProviderCapability>(PROVIDER_CAPABILITIES);
 const PROVIDER_RESPONSE_MODE_SET = new Set<ProviderResponseMode>(PROVIDER_RESPONSE_MODES);
 
@@ -34,6 +35,7 @@ export function collectManifestErrors(input: unknown): readonly ManifestError[] 
     assertNonEmptyString(input.version, "version", errors);
     assertResponseMode(input.responseMode, "responseMode", errors);
     assertCapabilityList(input.capabilities, "capabilities", errors);
+    assertAuth(input.auth, errors);
     if (input.allowsCustomModels !== undefined && typeof input.allowsCustomModels !== "boolean") {
         errors.push({ path: "allowsCustomModels", message: "必须是布尔值" });
     }
@@ -46,6 +48,57 @@ export function collectManifestErrors(input: unknown): readonly ManifestError[] 
         errors.push({ path: "metadata", message: "必须是 JSON 对象" });
     }
     return errors;
+}
+
+function assertAuth(value: unknown, errors: ManifestError[]) {
+    if (value === undefined) return;
+    if (!isRecord(value)) {
+        errors.push({ path: "auth", message: "必须是对象" });
+        return;
+    }
+    if (!Array.isArray(value.fields)) {
+        errors.push({ path: "auth.fields", message: "必须是数组" });
+        return;
+    }
+
+    const keys = new Set<string>();
+    value.fields.forEach((field, index) => {
+        const path = `auth.fields.${index}`;
+        if (!isRecord(field)) {
+            errors.push({ path, message: "必须是对象" });
+            return;
+        }
+        assertNonEmptyString(field.key, `${path}.key`, errors);
+        if (typeof field.key === "string" && field.key.trim()) {
+            if (keys.has(field.key)) errors.push({ path: `${path}.key`, message: "不能重复" });
+            keys.add(field.key);
+        }
+        if (typeof field.type !== "string" || !AUTH_FIELD_TYPES.has(field.type as AuthFieldType)) {
+            errors.push({ path: `${path}.type`, message: "字段类型不支持" });
+        }
+        assertNonEmptyString(field.label, `${path}.label`, errors);
+        if (field.placeholder !== undefined && typeof field.placeholder !== "string") {
+            errors.push({ path: `${path}.placeholder`, message: "必须是字符串" });
+        }
+        if (field.required !== undefined && typeof field.required !== "boolean") {
+            errors.push({ path: `${path}.required`, message: "必须是布尔值" });
+        }
+        if (field.options !== undefined) {
+            if (!Array.isArray(field.options)) {
+                errors.push({ path: `${path}.options`, message: "必须是数组" });
+            } else {
+                field.options.forEach((option, optionIndex) => {
+                    const optionPath = `${path}.options.${optionIndex}`;
+                    if (!isRecord(option)) {
+                        errors.push({ path: optionPath, message: "必须是对象" });
+                        return;
+                    }
+                    assertNonEmptyString(option.value, `${optionPath}.value`, errors);
+                    assertNonEmptyString(option.label, `${optionPath}.label`, errors);
+                });
+            }
+        }
+    });
 }
 
 function assertModels(models: unknown, manifestCapabilities: unknown, allowsCustomModels: boolean, errors: ManifestError[]) {

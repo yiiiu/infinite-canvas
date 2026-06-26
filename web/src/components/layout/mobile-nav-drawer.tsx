@@ -1,6 +1,7 @@
 "use client";
 
 import { Drawer } from "antd";
+import { Settings } from "lucide-react";
 import Link from "next/link";
 
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
@@ -9,10 +10,11 @@ import { cn } from "@/lib/utils";
 type MobileNavDrawerProps = {
     open: boolean;
     activeToolSlug?: NavigationToolSlug;
+    onOpenSettings: () => void;
     onClose: () => void;
 };
 
-export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
+export function MobileNavDrawer({ open, activeToolSlug, onOpenSettings, onClose }: MobileNavDrawerProps) {
     return (
         <Drawer title="导航" placement="left" size={280} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-1">
@@ -34,6 +36,17 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                         </Link>
                     );
                 })}
+                <button
+                    type="button"
+                    onClick={() => {
+                        onClose();
+                        onOpenSettings();
+                    }}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-base text-stone-600 transition hover:bg-stone-100 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                >
+                    <Settings className="size-5" />
+                    <span>设置</span>
+                </button>
             </div>
         </Drawer>
     );

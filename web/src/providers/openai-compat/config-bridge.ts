@@ -1,9 +1,15 @@
-import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
-import type { GenerateRequest, JsonObject, JsonValue, ProviderCapability } from "../core/types";
+import { modelOptionName, resolveProviderRequestConfig } from "@/providers/config/compat";
+import type { AiConfig } from "@/stores/use-config-store";
+import { ProviderError, ProviderErrorCode, type GenerateRequest, type JsonObject, type JsonValue, type ProviderCapability } from "../core/types";
 
 export function aiConfigToProviderRequest(config: AiConfig, capability: ProviderCapability, extraParams: JsonObject): GenerateRequest {
     const selectedModel = selectedModelForCapability(config, capability);
-    const requestConfig = resolveModelRequestConfig(config, selectedModel);
+    const requestConfig = resolveProviderRequestConfig(config, selectedModel, capability);
+    if (requestConfig.needsProviderConfiguration) {
+        throw new ProviderError(ProviderErrorCode.InvalidRequest, "请先完成 Provider 配置", {
+            details: { profileId: requestConfig.profileId || "", providerId: requestConfig.providerId || "" },
+        });
+    }
     return {
         capability,
         modelId: requestConfig.model,

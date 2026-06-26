@@ -5,6 +5,12 @@
     "description": "OpenAI 兼容图像、音频和视频生成 Provider。",
     "responseMode": "sync",
     "capabilities": ["image", "audio", "video"],
+    "auth": {
+        "fields": [
+            { "key": "baseUrl", "type": "string", "label": "Base URL", "placeholder": "https://api.example.com", "required": true },
+            { "key": "apiKey", "type": "password", "label": "API Key", "placeholder": "sk-...", "required": true }
+        ]
+    },
     "allowsCustomModels": true,
     "models": [],
     "parameterSchemas": {

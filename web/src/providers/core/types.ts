@@ -56,6 +56,17 @@ export type ProviderModel = {
     readonly parameterSchema?: JsonSchema;
 };
 
+export type AuthFieldType = "string" | "password" | "select" | "textarea";
+
+export type AuthField = {
+    readonly key: string;
+    readonly type: AuthFieldType;
+    readonly label: string;
+    readonly placeholder?: string;
+    readonly required?: boolean;
+    readonly options?: readonly { readonly value: string; readonly label: string }[];
+};
+
 export type ProviderManifest = {
     readonly id: string;
     readonly name: string;
@@ -64,6 +75,9 @@ export type ProviderManifest = {
     readonly homepage?: string;
     readonly responseMode: ProviderResponseMode;
     readonly capabilities: readonly ProviderCapability[];
+    readonly auth?: {
+        readonly fields: readonly AuthField[];
+    };
     readonly allowsCustomModels?: boolean;
     readonly models?: readonly ProviderModel[];
     readonly parameterSchemas?: Partial<Record<ProviderCapability, JsonSchema>>;
@@ -113,9 +127,21 @@ export type AdapterContext = {
     readonly updateTask?: (patch: ProviderTaskUpdate) => void | Promise<void>;
 };
 
+export type ProviderConnectionTestRequest = {
+    readonly auth: JsonObject;
+    readonly signal?: AbortSignal;
+};
+
+export type ProviderConnectionTestResult = {
+    readonly ok: boolean;
+    readonly message?: string;
+    readonly metadata?: JsonObject;
+};
+
 export type ProviderAdapter = {
     readonly manifest: ProviderManifest;
     generate<TParams extends JsonObject = JsonObject>(request: GenerateRequest<TParams>, context: AdapterContext): Promise<GenerateResult>;
+    testConnection?: (request: ProviderConnectionTestRequest, context: AdapterContext) => Promise<ProviderConnectionTestResult>;
 };
 
 export enum ProviderErrorCode {

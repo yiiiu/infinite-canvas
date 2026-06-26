@@ -4,6 +4,8 @@ import manifest from "./manifest.json";
 
 export const grsaiManifest = manifest as ProviderManifest;
 
+const GRSAI_DEFAULT_BASE_URL = "https://api.grsai.com";
+
 export const grsaiAdapter: ProviderAdapter = {
     manifest: grsaiManifest,
     async generate(request, context) {
@@ -11,6 +13,10 @@ export const grsaiAdapter: ProviderAdapter = {
             throw new ProviderError(ProviderErrorCode.UnsupportedCapability, `GrsAI 不支持 ${request.capability}`, { details: { capability: request.capability } });
         }
         return generateImage(request, context);
+    },
+    async testConnection(request, context) {
+        await getJson(context, request.auth, "/models", request.signal);
+        return { ok: true, message: "连接可用" };
     },
 };
 
@@ -74,6 +80,15 @@ async function postJson(context: AdapterContext, params: JsonObject, path: strin
     return body;
 }
 
+async function getJson(context: AdapterContext, params: JsonObject, path: string, signal: AbortSignal | undefined) {
+    const response = await context.fetch(apiUrl(params, path), { headers: headers(params), signal });
+    const body = await readJson(response);
+    if (!response.ok) {
+        throw normalizeGrsaiError(response.status, body, "GrsAI 连接测试失败");
+    }
+    return body;
+}
+
 async function readJson(response: Response): Promise<unknown> {
     const text = await response.text();
     if (!text) return null;
@@ -125,7 +140,7 @@ function isFailedResponse(payload: unknown) {
 }
 
 function apiUrl(params: JsonObject, path: string) {
-    const baseUrl = requiredString(params, "baseUrl").replace(/\/+$/, "");
+    const baseUrl = (stringParam(params, "baseUrl") || GRSAI_DEFAULT_BASE_URL).replace(/\/+$/, "");
     const lowerBaseUrl = baseUrl.toLowerCase();
     const apiBaseUrl = lowerBaseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
     return `${apiBaseUrl}/${path.replace(/^\/+/, "")}`;
