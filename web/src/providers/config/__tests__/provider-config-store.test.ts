@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { collectManifestErrors } from "../../core/manifest-loader";
-import { useProviderConfigStore } from "../use-provider-config-store";
+import { resetProfileModelListLoaderForTests, setProfileModelListLoaderForTests, useProviderConfigStore } from "../use-provider-config-store";
 
 beforeEach(() => {
+    resetProfileModelListLoaderForTests();
     useProviderConfigStore.getState().resetProviderConfig();
 });
 
@@ -62,6 +63,52 @@ test("setDefault does not change an existing profiles mode", () => {
 
     assert.equal(useProviderConfigStore.getState().mode, "profiles");
     assert.equal(useProviderConfigStore.getState().getEffectiveDefault("audio"), null);
+});
+
+test("refreshProfileModels stores model cache and clears previous error", async () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+    useProviderConfigStore.getState().updateProfile(profile.id, { modelsFetchError: "旧错误" });
+    setProfileModelListLoaderForTests(async (providerId, profileId) => {
+        assert.equal(providerId, "openai-compat");
+        assert.equal(profileId, profile.id);
+        return { source: "remote", models: [{ id: "gpt-4.1", name: "GPT 4.1" }, { id: "gpt-image-1" }] };
+    });
+
+    await useProviderConfigStore.getState().refreshProfileModels(profile.id);
+
+    const stored = useProviderConfigStore.getState().profiles[profile.id];
+    assert.deepEqual(stored.cachedModels, [{ id: "gpt-4.1", name: "GPT 4.1" }, { id: "gpt-image-1" }]);
+    assert.equal(typeof stored.modelsFetchedAt, "number");
+    assert.equal(stored.modelsFetchError, undefined);
+    assert.deepEqual(useProviderConfigStore.getState().getProfileModels(profile.id).models, stored.cachedModels);
+});
+
+test("refreshProfileModels keeps old cache when loading fails", async () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+    useProviderConfigStore.getState().updateProfile(profile.id, { cachedModels: [{ id: "cached-model" }], modelsFetchedAt: 123 });
+    setProfileModelListLoaderForTests(async () => {
+        throw new Error("上游不可用");
+    });
+
+    await useProviderConfigStore.getState().refreshProfileModels(profile.id);
+
+    const stored = useProviderConfigStore.getState().profiles[profile.id];
+    assert.deepEqual(stored.cachedModels, [{ id: "cached-model" }]);
+    assert.equal(stored.modelsFetchedAt, 123);
+    assert.equal(stored.modelsFetchError, "上游不可用");
+});
+
+test("refreshProfileModels ignores missing profile", async () => {
+    let called = false;
+    setProfileModelListLoaderForTests(async () => {
+        called = true;
+        return { source: "remote", models: [] };
+    });
+
+    await useProviderConfigStore.getState().refreshProfileModels("missing-profile");
+
+    assert.equal(called, false);
+    assert.deepEqual(useProviderConfigStore.getState().profiles, {});
 });
 
 test("validates provider manifest auth fields", () => {

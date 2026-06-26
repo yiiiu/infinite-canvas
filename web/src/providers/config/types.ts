@@ -1,3 +1,4 @@
+import type { ModelInfo } from "../core/types";
 import type { ApiCallFormat } from "@/stores/use-config-store";
 
 export const PROVIDER_CONFIG_STORE_KEY = "infinite-canvas:provider_config_store";
@@ -26,6 +27,10 @@ export type ProviderProfile = {
     readonly apiFormat?: ApiCallFormat;
     readonly auth?: Record<string, string>;
     readonly models: readonly string[];
+    readonly cachedModels?: readonly ModelInfo[];
+    readonly modelsFetchedAt?: number;
+    readonly modelsFetchError?: string;
+    readonly recentlyUsedModels?: readonly string[];
     readonly source?: ProviderProfileSource;
     readonly createdAt: string;
     readonly updatedAt: string;

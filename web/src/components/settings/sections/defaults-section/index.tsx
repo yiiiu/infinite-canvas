@@ -34,11 +34,12 @@ export function DefaultsSettingsSection() {
 
             {profiles.length ? (
                 <div className="overflow-hidden rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950">
-                    <div className="hidden grid-cols-[110px_minmax(180px,260px)_minmax(220px,1fr)_auto] gap-3 border-b border-stone-200 bg-stone-50 px-4 py-3 text-xs font-medium text-stone-500 dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-400 md:grid">
+                    <div className="hidden grid-cols-[80px_120px_minmax(180px,260px)_minmax(220px,1fr)_72px] gap-3 border-b border-stone-200 bg-stone-50 px-4 py-3 text-xs font-medium text-stone-500 dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-400 md:grid">
+                        <div>状态</div>
                         <div>能力</div>
                         <div>配置档</div>
-                        <div>模型 ID</div>
-                        <div className="text-right">操作</div>
+                        <div>模型</div>
+                        <div className="text-right">清空</div>
                     </div>
                     {CAPABILITIES.map((capability) => (
                         <CapabilityRow key={capability.id} capability={capability} profiles={profiles} selection={defaults[capability.id]} onChange={setDefault} />

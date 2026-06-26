@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert } from "antd";
+import { Alert, message } from "antd";
 import { ServerCog } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -21,6 +21,7 @@ export function ProviderSettingsSection() {
     const updateProfile = useProviderConfigStore((state) => state.updateProfile);
     const setProfileEnabled = useProviderConfigStore((state) => state.setProfileEnabled);
     const removeProfile = useProviderConfigStore((state) => state.removeProfile);
+    const refreshProfileModels = useProviderConfigStore((state) => state.refreshProfileModels);
     const [selectedProfileId, setSelectedProfileId] = useState("");
     const [creating, setCreating] = useState(false);
     const [creatingProviderId, setCreatingProviderId] = useState("");
@@ -46,17 +47,32 @@ export function ProviderSettingsSection() {
         setSelectedProfileId("");
     };
 
+    const refreshModels = (profileId: string, showSuccess = true) => {
+        const profile = useProviderConfigStore.getState().profiles[profileId];
+        if (!profile?.providerId || !defaultProviderRegistry.get(profile.providerId)?.listModels) return Promise.resolve();
+        return refreshProfileModels(profileId).then(() => {
+            const result = useProviderConfigStore.getState().getProfileModels(profileId);
+            if (result.error) {
+                message.warning("模型列表加载失败");
+                return;
+            }
+            if (showSuccess) message.success(`已加载 ${result.models.length} 个模型`);
+        });
+    };
+
     const saveProfile = (value: ProfileFormValue) => {
         if (formCreating) {
             const profile = createProfile({ ...value, enabled: true, models: [] });
             setSelectedProfileId(profile.id);
             setCreating(false);
             setCreatingProviderId("");
+            refreshModels(profile.id);
             return;
         }
         if (!activeProfile) return;
         updateProfile(activeProfile.id, value);
         setSelectedProfileId(activeProfile.id);
+        refreshModels(activeProfile.id);
     };
 
     const deleteProfile = (profileId: string) => {
@@ -77,7 +93,7 @@ export function ProviderSettingsSection() {
             </div>
             <Alert type="info" showIcon message="配置档只保存连接信息" description="业务默认模型请到“默认模型”页面按能力配置。" />
             <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-4">
-                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); setCreatingProviderId(""); }} onToggle={setProfileEnabled} onDelete={deleteProfile} />
+                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); setCreatingProviderId(""); }} onToggle={setProfileEnabled} onDelete={deleteProfile} onRefreshModels={(profileId) => refreshModels(profileId, true)} />
                 <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} initialProviderId={creatingProviderId} onSave={saveProfile} onCancelCreate={creating ? () => { setCreating(false); setCreatingProviderId(""); } : undefined} />
             </div>
         </div>

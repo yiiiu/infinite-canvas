@@ -7,6 +7,25 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import { migrateAiConfigToProviderConfig } from "./migration";
 import { PROVIDER_CONFIG_STORE_KEY, type ProviderConfigData, type ProviderConfigCapability, type ProviderConfigMode, type ProviderModelSelection, type ProviderProfile } from "./types";
+import type { ModelListResult } from "../core/types";
+
+type ProfileModelListLoader = (providerId: string, profileId: string) => Promise<ModelListResult>;
+
+let profileModelListLoader: ProfileModelListLoader = async (providerId, profileId) => {
+    const { defaultProviderClient } = await import("../index");
+    return defaultProviderClient.listModels(providerId, profileId);
+};
+
+export function setProfileModelListLoaderForTests(loader: ProfileModelListLoader) {
+    profileModelListLoader = loader;
+}
+
+export function resetProfileModelListLoaderForTests() {
+    profileModelListLoader = async (providerId, profileId) => {
+        const { defaultProviderClient } = await import("../index");
+        return defaultProviderClient.listModels(providerId, profileId);
+    };
+}
 
 type ProviderProfileInput = {
     readonly name: string;
@@ -29,6 +48,8 @@ type ProviderConfigStore = ProviderConfigData & {
     removeProfile: (profileId: string) => void;
     setDefault: (capability: ProviderConfigCapability, value: ProviderModelSelection | null) => void;
     setDefaultSelection: (capability: ProviderConfigCapability, selection: ProviderModelSelection | undefined) => void;
+    refreshProfileModels: (profileId: string) => Promise<void>;
+    getProfileModels: (profileId: string) => { models: ModelListResult["models"]; fetchedAt?: number; error?: string };
     getProfile: (profileId: string) => ProviderProfile | undefined;
     getEffectiveDefault: (capability: ProviderConfigCapability) => ProviderModelSelection | null;
     resetProviderConfig: () => void;
@@ -113,6 +134,48 @@ export const useProviderConfigStore = create<ProviderConfigStore>()(
                         : Object.fromEntries(Object.entries(state.defaults).filter(([key]) => key !== capability)),
                 })),
             setDefaultSelection: (capability, selection) => get().setDefault(capability, selection ?? null),
+            refreshProfileModels: async (profileId) => {
+                const profile = get().profiles[profileId];
+                if (!profile?.providerId) return;
+                try {
+                    const result = await profileModelListLoader(profile.providerId, profileId);
+                    set((state) => {
+                        const current = state.profiles[profileId];
+                        if (!current) return {};
+                        const { modelsFetchError: _modelsFetchError, ...profileWithoutError } = current;
+                        return {
+                            profiles: {
+                                ...state.profiles,
+                                [profileId]: {
+                                    ...profileWithoutError,
+                                    cachedModels: result.models,
+                                    modelsFetchedAt: Date.now(),
+                                    updatedAt: new Date().toISOString(),
+                                },
+                            },
+                        };
+                    });
+                } catch (error) {
+                    set((state) => {
+                        const current = state.profiles[profileId];
+                        if (!current) return {};
+                        return {
+                            profiles: {
+                                ...state.profiles,
+                                [profileId]: {
+                                    ...current,
+                                    modelsFetchError: error instanceof Error ? error.message : "模型列表加载失败",
+                                    updatedAt: new Date().toISOString(),
+                                },
+                            },
+                        };
+                    });
+                }
+            },
+            getProfileModels: (profileId) => {
+                const profile = get().profiles[profileId];
+                return { models: [...(profile?.cachedModels || [])], fetchedAt: profile?.modelsFetchedAt, error: profile?.modelsFetchError };
+            },
             getProfile: (profileId) => get().profiles[profileId],
             getEffectiveDefault: (capability) => {
                 const selection = get().defaults[capability];
