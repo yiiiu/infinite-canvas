@@ -721,6 +721,11 @@ function InfiniteCanvasPage() {
         setContextMenu(null);
     }, []);
 
+    const handleImageSettingsOpenChange = useCallback((open: boolean) => {
+        setNodeImageSettingsOpen(open);
+        if (open) setToolbarNodeId(null);
+    }, []);
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
@@ -840,10 +845,7 @@ function InfiniteCanvasPage() {
                                         onProviderOverrideChange={handleProviderOverrideChange}
                                         onGenerate={handleGenerateNode}
                                         onStop={confirmStopGeneration}
-                                        onImageSettingsOpenChange={(open) => {
-                                            setNodeImageSettingsOpen(open);
-                                            if (open) setToolbarNodeId(null);
-                                        }}
+                                        onImageSettingsOpenChange={handleImageSettingsOpenChange}
                                     />
                                 )
                             }
