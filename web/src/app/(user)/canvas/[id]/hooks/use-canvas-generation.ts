@@ -109,6 +109,65 @@ function providerOverrideForCapability(capability: ProviderConfigCapability): Pr
     return profileId && modelId ? { profileId, modelId } : undefined;
 }
 
+const STREAM_FLUSH_INTERVAL_MS = 80;
+
+/**
+ * 创建一个针对单节点流式文本写入的节流器。
+ * - mousemove 拖拽期间需要避免高频 setNodes 抢占主线程
+ * - 每 STREAM_FLUSH_INTERVAL_MS 至多写入一次，最后一次必须 flush
+ *
+ * 返回 { push, flush }：
+ *   - push(text)：记录最新文本，按节流间隔触发 setNodes
+ *   - flush()：立即写入最新文本（用于流结束前最后兜底）
+ */
+function createStreamTextFlusher(
+    setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>,
+    nodeId: string,
+) {
+    let latestText = "";
+    let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastFlushAt = 0;
+
+    const writeNow = () => {
+        pendingTimer = null;
+        lastFlushAt = Date.now();
+        const text = latestText;
+        setNodes((prev) =>
+            prev.map((node) =>
+                node.id === nodeId
+                    ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: text, status: NODE_STATUS_LOADING } }
+                    : node,
+            ),
+        );
+    };
+
+    return {
+        push(text: string) {
+            latestText = text;
+            const now = Date.now();
+            const elapsed = now - lastFlushAt;
+            if (elapsed >= STREAM_FLUSH_INTERVAL_MS) {
+                if (pendingTimer) {
+                    clearTimeout(pendingTimer);
+                    pendingTimer = null;
+                }
+                writeNow();
+                return;
+            }
+            if (pendingTimer) return;
+            pendingTimer = setTimeout(writeNow, STREAM_FLUSH_INTERVAL_MS - elapsed);
+        },
+        flush() {
+            if (pendingTimer) {
+                clearTimeout(pendingTimer);
+                pendingTimer = null;
+            }
+            // 即使没有挂起的写入也强制写一次，确保 UI 拿到最终文本
+            writeNow();
+        },
+    };
+}
+
 function providerIdForRequest(request: { readonly providerId?: string; readonly params: { readonly baseUrl?: unknown } }) {
     return request.providerId || providerIdForParams(request.params);
 }
@@ -562,12 +621,18 @@ export function useCanvasGeneration({
                 const answers = await Promise.all(
                     textTargetIds.map((targetNodeId) => {
                         let localStreamed = "";
+                        const flusher = createStreamTextFlusher(setNodes, targetNodeId);
                         return requestImageQuestion(generationConfig, buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt }), (text) => {
                             localStreamed = text;
                             streamed = text;
                             if (isConfigNode) return;
-                            setNodes((prev) => prev.map((node) => (node.id === targetNodeId ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: text, status: NODE_STATUS_LOADING } } : node)));
-                        }, { signal: controller.signal }).then((answer) => ({ nodeId: targetNodeId, content: answer || localStreamed })).finally(() => finishGenerationRequest(targetNodeId, controller));
+                            flusher.push(text);
+                        }, { signal: controller.signal })
+                            .then((answer) => ({ nodeId: targetNodeId, content: answer || localStreamed }))
+                            .finally(() => {
+                                flusher.flush();
+                                finishGenerationRequest(targetNodeId, controller);
+                            });
                     }),
                 );
                 if (controller.signal.aborted) return;
@@ -699,11 +764,18 @@ export function useCanvasGeneration({
                 if (node.type === CanvasNodeType.Text) {
                     if (!context) return;
                     let streamed = "";
-                    const answer = await requestImageQuestion(generationConfig, buildNodeResponseMessages({ ...context, prompt }), (text) => {
-                        streamed = text;
-                        setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: text, status: NODE_STATUS_LOADING } } : item)));
-                    }, { signal: controller.signal });
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
+                    const flusher = createStreamTextFlusher(setNodes, node.id);
+                    try {
+                        const answer = await requestImageQuestion(generationConfig, buildNodeResponseMessages({ ...context, prompt }), (text) => {
+                            streamed = text;
+                            flusher.push(text);
+                        }, { signal: controller.signal });
+                        flusher.flush();
+                        setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
+                    } catch (error) {
+                        flusher.flush(); // 出错也 flush，让用户看到当前已生成的部分
+                        throw error;
+                    }
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
