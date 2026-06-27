@@ -111,6 +111,46 @@ test("refreshProfileModels ignores missing profile", async () => {
     assert.deepEqual(useProviderConfigStore.getState().profiles, {});
 });
 
+test("recordModelUsage creates and increments recent model usage", () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+
+    useProviderConfigStore.getState().recordModelUsage(profile.id, "gpt-4.1");
+    useProviderConfigStore.getState().recordModelUsage(profile.id, "gpt-image-1");
+    useProviderConfigStore.getState().recordModelUsage(profile.id, "gpt-4.1");
+
+    assert.deepEqual(
+        useProviderConfigStore.getState().profiles[profile.id].recentlyUsedModels?.map((item) => ({ modelId: item.modelId, count: item.count })),
+        [
+            { modelId: "gpt-4.1", count: 2 },
+            { modelId: "gpt-image-1", count: 1 },
+        ],
+    );
+});
+
+test("recordModelUsage keeps only top 20 models by count", () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+
+    for (let index = 0; index < 25; index += 1) {
+        useProviderConfigStore.getState().recordModelUsage(profile.id, `model-${index}`);
+    }
+    useProviderConfigStore.getState().recordModelUsage(profile.id, "model-0");
+
+    const usage = useProviderConfigStore.getState().profiles[profile.id].recentlyUsedModels || [];
+    assert.equal(usage.length, 20);
+    assert.equal(usage[0].modelId, "model-0");
+    assert.equal(usage[0].count, 2);
+    assert.equal(usage.every((item) => item.modelId === "model-0" || item.count === 1), true);
+});
+
+test("recordModelUsage ignores missing profile or blank model", () => {
+    useProviderConfigStore.getState().recordModelUsage("missing", "gpt-4.1");
+    assert.deepEqual(useProviderConfigStore.getState().profiles, {});
+
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+    useProviderConfigStore.getState().recordModelUsage(profile.id, "  ");
+    assert.equal(useProviderConfigStore.getState().profiles[profile.id].recentlyUsedModels, undefined);
+});
+
 test("validates provider manifest auth fields", () => {
     const errors = collectManifestErrors({
         id: "test",

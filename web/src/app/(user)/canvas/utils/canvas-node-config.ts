@@ -1,5 +1,6 @@
 import type { UploadedFile } from "@/services/file-storage";
 import type { UploadedImage } from "@/services/image-storage";
+import { useProviderConfigStore, type ProviderModelSelection } from "@/providers/config";
 
 import type { CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
@@ -71,6 +72,7 @@ export function buildAnglePrompt(params: CanvasImageAngleParams) {
 export function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const providerOverride = type === CanvasNodeType.Image ? imageProviderOverride() : undefined;
     return {
         id,
         type,
@@ -78,6 +80,14 @@ export function createCanvasNode(type: CanvasNodeType, position: Position, metad
         position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
         width: spec.width,
         height: spec.height,
+        ...(providerOverride ? { providerOverride } : {}),
         metadata: { ...spec.metadata, ...metadata },
     };
+}
+
+function imageProviderOverride(): ProviderModelSelection | undefined {
+    const selection = useProviderConfigStore.getState().defaults.image;
+    const profileId = selection?.profileId?.trim();
+    const modelId = selection?.modelId?.trim();
+    return profileId && modelId ? { profileId, modelId } : undefined;
 }

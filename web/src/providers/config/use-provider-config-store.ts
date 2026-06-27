@@ -5,7 +5,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { localForageStorage } from "@/lib/localforage-storage";
 import type { AiConfig } from "@/stores/use-config-store";
-import { migrateAiConfigToProviderConfig } from "./migration";
+import { migrateAiConfigToProviderConfig, normalizeProviderConfigData } from "./migration";
 import { PROVIDER_CONFIG_STORE_KEY, type ProviderConfigData, type ProviderConfigCapability, type ProviderConfigMode, type ProviderModelSelection, type ProviderProfile } from "./types";
 import type { ModelListResult } from "../core/types";
 
@@ -49,6 +49,8 @@ type ProviderConfigStore = ProviderConfigData & {
     setDefault: (capability: ProviderConfigCapability, value: ProviderModelSelection | null) => void;
     setDefaultSelection: (capability: ProviderConfigCapability, selection: ProviderModelSelection | undefined) => void;
     refreshProfileModels: (profileId: string) => Promise<void>;
+    updateProfileModels: (profileId: string, data: { models: ModelListResult["models"]; fetchedAt: number; error?: string }) => void;
+    recordModelUsage: (profileId: string, modelId: string) => void;
     getProfileModels: (profileId: string) => { models: ModelListResult["models"]; fetchedAt?: number; error?: string };
     getProfile: (profileId: string) => ProviderProfile | undefined;
     getEffectiveDefault: (capability: ProviderConfigCapability) => ProviderModelSelection | null;
@@ -66,7 +68,8 @@ const providerConfigStorage: PersistStorage<ProviderConfigStore> = {
     getItem: async (name) => {
         const value = await localForageStorage.getItem(name);
         if (!value) return null;
-        return JSON.parse(value) as StorageValue<ProviderConfigStore>;
+        const parsed = JSON.parse(value) as StorageValue<ProviderConfigStore>;
+        return { ...parsed, state: normalizeProviderConfigData(parsed.state) as ProviderConfigStore };
     },
     setItem: (name, value) => localForageStorage.setItem(name, JSON.stringify(value)),
     removeItem: (name) => localForageStorage.removeItem(name),
@@ -172,6 +175,45 @@ export const useProviderConfigStore = create<ProviderConfigStore>()(
                     });
                 }
             },
+            updateProfileModels: (profileId, data) =>
+                set((state) => {
+                    const profile = state.profiles[profileId];
+                    if (!profile) return {};
+                    const { modelsFetchError: _modelsFetchError, ...profileWithoutError } = profile;
+                    return {
+                        profiles: {
+                            ...state.profiles,
+                            [profileId]: {
+                                ...profileWithoutError,
+                                cachedModels: data.models,
+                                modelsFetchedAt: data.fetchedAt,
+                                ...(data.error ? { modelsFetchError: data.error } : {}),
+                                updatedAt: new Date().toISOString(),
+                            },
+                        },
+                    };
+                }),
+            recordModelUsage: (profileId, modelId) =>
+                set((state) => {
+                    const profile = state.profiles[profileId];
+                    const normalizedModelId = modelId.trim();
+                    if (!profile || !normalizedModelId) return {};
+                    const now = Date.now();
+                    const current = profile.recentlyUsedModels || [];
+                    const existing = current.find((item) => item.modelId === normalizedModelId);
+                    const next = [
+                        ...(existing ? current.filter((item) => item.modelId !== normalizedModelId) : current),
+                        { modelId: normalizedModelId, count: (existing?.count || 0) + 1, lastUsedAt: now },
+                    ]
+                        .sort((a, b) => b.count - a.count || b.lastUsedAt - a.lastUsedAt)
+                        .slice(0, 20);
+                    return {
+                        profiles: {
+                            ...state.profiles,
+                            [profileId]: { ...profile, recentlyUsedModels: next, updatedAt: new Date().toISOString() },
+                        },
+                    };
+                }),
             getProfileModels: (profileId) => {
                 const profile = get().profiles[profileId];
                 return { models: [...(profile?.cachedModels || [])], fetchedAt: profile?.modelsFetchedAt, error: profile?.modelsFetchError };

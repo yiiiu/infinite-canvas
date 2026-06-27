@@ -2,9 +2,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
+import { ChevronRight, AlertCircle, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
+import { Tooltip } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { useProviderConfigStore } from "@/providers/config";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -27,6 +29,7 @@ type CanvasNodeProps = {
     showImageInfo: boolean;
     resourceLabel?: CanvasResourceReference;
     mentionReferences?: CanvasResourceReference[];
+    referencePickLabel?: string;
     renderPanel?: (node: CanvasNodeData) => ReactNode;
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     batchCount?: number;
@@ -82,6 +85,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     showImageInfo,
     resourceLabel,
     mentionReferences = [],
+    referencePickLabel,
     renderPanel,
     renderNodeContent,
     batchCount = 0,
@@ -104,6 +108,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     onContextMenu,
 }: CanvasNodeProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const providerProfiles = useProviderConfigStore((state) => state.profiles);
+    const providerIssue = data.type === CanvasNodeType.Image ? providerOverrideIssue(data.providerOverride, providerProfiles) : null;
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
@@ -111,6 +117,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
+    const referencePickSelected = referencePickLabel === "取消参考";
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -316,7 +323,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
+                {referencePickLabel ? <ReferencePickBadge label={referencePickLabel} selected={referencePickSelected} hovered={hovered} /> : null}
                 {resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
+                {providerIssue ? <ProviderIssueBadge message={providerIssue} /> : null}
 
                 {!hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
 
@@ -448,6 +457,25 @@ function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference 
             {reference.label}
         </span>
     );
+}
+
+function ProviderIssueBadge({ message }: { message: string }) {
+    return (
+        <Tooltip title={message} placement="top">
+            <span className="absolute left-3 top-3 z-40 inline-flex size-7 items-center justify-center rounded-full border border-red-300/70 bg-red-500/15 text-red-500 backdrop-blur-md" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                <AlertCircle className="size-4" />
+            </span>
+        </Tooltip>
+    );
+}
+
+function providerOverrideIssue(value: CanvasNodeData["providerOverride"], profiles: Record<string, { enabled?: boolean }>) {
+    const profileId = value?.profileId?.trim();
+    if (!profileId) return null;
+    const profile = profiles[profileId];
+    if (!profile) return "Profile 不存在";
+    if (profile.enabled === false) return "Profile 已禁用，请重选";
+    return null;
 }
 
 function ImageNodeContent(props: NodeContentRendererProps) {
@@ -597,6 +625,22 @@ function ImageContent({
                 </button>
             ) : null}
         </BatchFrame>
+    );
+}
+
+function ReferencePickBadge({ label, selected, hovered }: { label: string; selected: boolean; hovered: boolean }) {
+    if (selected) {
+        return (
+            <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-[inherit] bg-black/30 backdrop-blur-[1px] transition">
+                {hovered ? <span className="rounded-full border border-red-200/60 bg-red-500/45 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-950/30 backdrop-blur-md">取消参考</span> : null}
+            </div>
+        );
+    }
+    if (!hovered) return null;
+    return (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-[inherit] bg-black/10 transition">
+            <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-semibold text-white shadow-lg backdrop-blur-sm">{label}</span>
+        </div>
     );
 }
 

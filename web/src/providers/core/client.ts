@@ -55,6 +55,7 @@ export function createProviderClient(options: ProviderClientOptions = {}): Provi
 
             try {
                 const result = await adapter.generate(request, context);
+                if (request.profileId) useProviderConfigStore.getState().recordModelUsage(request.profileId, request.modelId);
                 if (shouldTrackTask && request.pendingId) useProviderTaskStore.getState().completeTask(request.pendingId, result);
                 return result;
             } catch (error) {

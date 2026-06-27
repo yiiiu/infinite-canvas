@@ -87,6 +87,8 @@ export type ProviderManifest = {
 export type GenerateRequest<TParams extends JsonObject = JsonObject> = {
     readonly capability: ProviderCapability;
     readonly modelId: string;
+    readonly providerId?: string;
+    readonly profileId?: string;
     readonly params: TParams;
     readonly signal: AbortSignal | undefined;
     readonly pendingId?: string;

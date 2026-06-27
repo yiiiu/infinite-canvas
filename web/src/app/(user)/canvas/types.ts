@@ -62,6 +62,11 @@ export type CanvasNodeMetadata = {
     };
 };
 
+export type CanvasProviderOverride = {
+    profileId: string;
+    modelId: string;
+};
+
 export type CanvasNodeData = {
     id: string;
     type: CanvasNodeType;
@@ -69,6 +74,7 @@ export type CanvasNodeData = {
     position: Position;
     width: number;
     height: number;
+    providerOverride?: CanvasProviderOverride;
     metadata?: CanvasNodeMetadata;
 };
 

@@ -21,7 +21,7 @@ type ProfileListProps = {
     onSelect: (profileId: string) => void;
     onToggle: (profileId: string, enabled: boolean) => void;
     onDelete: (profileId: string) => void;
-    onRefreshModels: (profileId: string) => Promise<void> | void;
+    onRefreshModels?: (profileId: string) => Promise<void> | void;
 };
 
 export function ProfileList({ groups, selectedProfileId, onCreate, onSelect, onToggle, onDelete, onRefreshModels }: ProfileListProps) {
@@ -29,6 +29,7 @@ export function ProfileList({ groups, selectedProfileId, onCreate, onSelect, onT
     const [refreshingId, setRefreshingId] = useState("");
 
     const refreshModels = (profileId: string) => {
+        if (!onRefreshModels) return;
         setRefreshingId(profileId);
         void Promise.resolve(onRefreshModels(profileId)).finally(() => setRefreshingId((current) => (current === profileId ? "" : current)));
     };
@@ -57,7 +58,7 @@ export function ProfileList({ groups, selectedProfileId, onCreate, onSelect, onT
                                 {group.profiles.length ? group.profiles.map((profile) => {
                                     const active = profile.id === selectedProfileId;
                                     const enabled = profile.enabled !== false;
-                                    const supportsModelList = profile.providerId ? Boolean(defaultProviderRegistry.get(profile.providerId)?.listModels) : false;
+                                    const supportsModelList = Boolean(onRefreshModels && profile.providerId && defaultProviderRegistry.get(profile.providerId)?.listModels);
                                     return (
                                         <div key={profile.id} className={cn("rounded-lg border p-3 transition", active ? "border-stone-900 bg-stone-50 dark:border-stone-100 dark:bg-stone-900" : "border-stone-200 bg-white hover:bg-stone-50 dark:border-stone-800 dark:bg-stone-950 dark:hover:bg-stone-900")}> 
                                             <button type="button" className="block w-full text-left" onClick={() => onSelect(profile.id)}>

@@ -3,13 +3,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { BookOpen, Bot, Boxes, Home, ImageIcon, Images, List, Menu, MousePointer2, Music2, Plus, Redo2, ServerCog, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 
 import { DOCS_URL } from "@/constant/env";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
-import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
+import { canvasThemes } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
+import { SettingsModal } from "@/components/settings/settings-modal";
+import { DefaultsSettingsSection } from "@/components/settings/sections/defaults-section";
+import { ProviderSettingsSection } from "@/components/settings/sections/provider-section";
+import type { SettingsSection } from "@/components/settings/types";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { App, Button, Dropdown, Modal } from "antd";
@@ -30,6 +34,7 @@ import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { CanvasToolbar } from "../components/canvas-toolbar";
+import { CanvasAppearanceSettingsSection } from "../components/canvas-appearance-settings-section";
 import { AssetPickerModal } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasLocalAgentPanel } from "../components/canvas-local-agent-panel";
@@ -180,6 +185,7 @@ function InfiniteCanvasPage() {
     const historyPausedRef = useRef(false);
     const nodeDraggingRef = useRef(false);
     const restoreViewportRef = useRef<(viewport: ViewportTransform) => void>(() => {});
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
@@ -283,7 +289,21 @@ function InfiniteCanvasPage() {
     const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
     const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+    const [referencePickTargetNodeId, setReferencePickTargetNodeId] = useState<string | null>(null);
     const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+    const canvasSettingsSections = useMemo<SettingsSection[]>(
+        () => [
+            {
+                id: "canvas-general",
+                title: "常规",
+                icon: <Settings2 className="size-4" />,
+                component: () => <CanvasAppearanceSettingsSection backgroundMode={backgroundMode} showImageInfo={showImageInfo} onBackgroundModeChange={setBackgroundMode} onShowImageInfoChange={setShowImageInfo} />,
+            },
+            { id: "providers", title: "AI 服务商", icon: <ServerCog className="size-4" />, component: ProviderSettingsSection },
+            { id: "defaults", title: "默认模型", icon: <Boxes className="size-4" />, component: DefaultsSettingsSection },
+        ],
+        [backgroundMode, setBackgroundMode, setShowImageInfo, showImageInfo],
+    );
     const selectedNodeIdsRef = useRef<Set<string>>(new Set());
     const selectionBoxRef = useRef<SelectionBox | null>(null);
 
@@ -433,6 +453,43 @@ function InfiniteCanvasPage() {
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, setConnecting],
     );
 
+    const addImageReferenceConnection = useCallback(
+        (targetNodeId: string, sourceNodeId: string) => {
+            if (targetNodeId === sourceNodeId) return;
+            const source = nodesRef.current.find((node) => node.id === sourceNodeId);
+            const target = nodesRef.current.find((node) => node.id === targetNodeId);
+            if (source?.type !== CanvasNodeType.Image || !source.metadata?.content || target?.type !== CanvasNodeType.Image) return;
+            const exists = connectionsRef.current.some((connection) => connection.fromNodeId === sourceNodeId && connection.toNodeId === targetNodeId);
+            if (exists) return;
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceNodeId, toNodeId: targetNodeId }]);
+        },
+        [setConnections],
+    );
+
+    const removeImageReferenceConnection = useCallback(
+        (targetNodeId: string, sourceNodeId: string) => {
+            const connection = connectionsRef.current.find((item) => item.fromNodeId === sourceNodeId && item.toNodeId === targetNodeId);
+            if (connection) deleteConnection(connection.id);
+        },
+        [deleteConnection],
+    );
+
+    const locateReferencePickTargetNode = useCallback(() => {
+        const targetNodeId = referencePickTargetNodeId;
+        const node = targetNodeId ? nodesRef.current.find((item) => item.id === targetNodeId) : null;
+        if (!node) return;
+        const scale = viewportRef.current.k;
+        setViewport({
+            x: size.width / 2 - (node.position.x + node.width / 2) * scale,
+            y: size.height / 2 - (node.position.y + node.height / 2) * scale,
+            k: scale,
+        });
+        setSelectedNodeIds(new Set([node.id]));
+        setDialogNodeId(node.id);
+        setSelectedConnectionId(null);
+        setContextMenu(null);
+    }, [referencePickTargetNodeId, setContextMenu, setDialogNodeId, setSelectedConnectionId, setSelectedNodeIds, setViewport, size.height, size.width, viewportRef]);
+
     const visibleNodes = useMemo(() => {
         const padding = 280;
         const rect = containerRef.current?.getBoundingClientRect();
@@ -458,6 +515,23 @@ function InfiniteCanvasPage() {
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
+
+    useEffect(() => {
+        if (!referencePickTargetNodeId) return;
+        const targetNode = nodesRef.current.find((node) => node.id === referencePickTargetNodeId);
+        if (!targetNode || targetNode.type !== CanvasNodeType.Image) setReferencePickTargetNodeId(null);
+    }, [nodes, referencePickTargetNodeId]);
+
+    useEffect(() => {
+        if (!referencePickTargetNodeId) return;
+        const handleReferencePickKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            setReferencePickTargetNodeId(null);
+        };
+        window.addEventListener("keydown", handleReferencePickKeyDown);
+        return () => window.removeEventListener("keydown", handleReferencePickKeyDown);
+    }, [referencePickTargetNodeId]);
+
     const batchChildCountById = useMemo(() => {
         const map = new Map<string, number>();
         nodes.forEach((node) => {
@@ -511,6 +585,10 @@ function InfiniteCanvasPage() {
         nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
         return map;
     }, [connections, nodes]);
+    const referencePickSourceNodeIds = useMemo(() => {
+        if (!referencePickTargetNodeId) return new Set<string>();
+        return new Set(connections.filter((connection) => connection.toNodeId === referencePickTargetNodeId).map((connection) => connection.fromNodeId));
+    }, [connections, referencePickTargetNodeId]);
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
         () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
         [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
@@ -529,6 +607,7 @@ function InfiniteCanvasPage() {
         openTextEditor,
         handleNodePromptChange,
         handleConfigNodeChange,
+        handleProviderOverrideChange,
         downloadNodeImage,
         saveNodeAsset,
         createImageReversePromptNodes,
@@ -665,6 +744,7 @@ function InfiniteCanvasPage() {
                     agentOpen={assistantOpen}
                     compactAgentStatus={codexCompactAgent ? { connected: localAgentConnected, enabled: localAgentEnabled, activity: localAgentActivity } : undefined}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
+                    onOpenSettings={() => setSettingsOpen(true)}
                 />
 
                 <InfiniteCanvas
@@ -723,7 +803,7 @@ function InfiniteCanvasPage() {
                             isSelected={selectedNodeIds.has(node.id)}
                             isRelated={relatedHighlight.nodeIds.has(node.id)}
                             isFocusRelated={activeNodeId === node.id}
-                            isConnectionTarget={connectionTargetNodeId === node.id}
+                            isConnectionTarget={connectionTargetNodeId === node.id || (referencePickTargetNodeId !== null && hoveredNodeId === node.id && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content) && node.id !== referencePickTargetNodeId)}
                             isConnecting={Boolean(connectingParams)}
                             editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
                             showPanel={dialogNodeId === node.id && !selectionBox}
@@ -736,6 +816,7 @@ function InfiniteCanvasPage() {
                             showImageInfo={showImageInfo}
                             resourceLabel={resourceReferenceByNodeId.get(node.id)}
                             mentionReferences={mentionReferencesByNodeId.get(node.id) || []}
+                            referencePickLabel={referencePickTargetNodeId && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content) && node.id !== referencePickTargetNodeId ? (referencePickSourceNodeIds.has(node.id) ? "取消参考" : "选择为参考") : undefined}
                             renderPanel={(panelNode) =>
                                 panelNode.type === CanvasNodeType.Config ? (
                                     <CanvasConfigComposer
@@ -749,8 +830,12 @@ function InfiniteCanvasPage() {
                                         node={panelNode}
                                         isRunning={runningNodeId === panelNode.id}
                                         mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
+                                        referencePicking={referencePickTargetNodeId === panelNode.id}
+                                        onStartReferencePick={(nodeId) => setReferencePickTargetNodeId((current) => (current === nodeId ? null : nodeId))}
+                                        onRemoveReference={removeImageReferenceConnection}
                                         onPromptChange={handleNodePromptChange}
                                         onConfigChange={handleConfigNodeChange}
+                                        onProviderOverrideChange={handleProviderOverrideChange}
                                         onGenerate={handleGenerateNode}
                                         onStop={confirmStopGeneration}
                                         onImageSettingsOpenChange={(open) => {
@@ -774,10 +859,25 @@ function InfiniteCanvasPage() {
                                     }}
                                 />
                             )}
-                            onMouseDown={handleNodeMouseDown}
+                            onMouseDown={(event, nodeId) => {
+                                const targetNodeId = referencePickTargetNodeId;
+                                const clickedNode = nodesRef.current.find((item) => item.id === nodeId);
+                                if (targetNodeId && clickedNode?.type === CanvasNodeType.Image && clickedNode.metadata?.content && clickedNode.id !== targetNodeId) {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    if (referencePickSourceNodeIds.has(nodeId)) {
+                                        removeImageReferenceConnection(targetNodeId, nodeId);
+                                    } else {
+                                        addImageReferenceConnection(targetNodeId, nodeId);
+                                    }
+                                    return;
+                                }
+                                handleNodeMouseDown(event, nodeId);
+                            }}
                             onHoverStart={(nodeId) => {
                                 if (nodeDraggingRef.current) return;
                                 setHoveredNodeId(nodeId);
+                                if (referencePickTargetNodeId) return;
                                 keepNodeToolbar(nodeId);
                             }}
                             onHoverEnd={(nodeId) => {
@@ -816,8 +916,10 @@ function InfiniteCanvasPage() {
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
                 </InfiniteCanvas>
 
+                {referencePickTargetNodeId ? <CanvasReferencePickBanner onLocateTarget={locateReferencePickTargetNode} onExit={() => setReferencePickTargetNodeId(null)} /> : null}
+
                 <CanvasNodeHoverToolbar
-                    node={isNodeDragging || nodeImageSettingsOpen ? null : toolbarNode}
+                    node={isNodeDragging || nodeImageSettingsOpen || referencePickTargetNodeId ? null : toolbarNode}
                     viewport={viewport}
                     onKeep={keepNodeToolbar}
                     onLeave={hideNodeToolbar}
@@ -847,8 +949,6 @@ function InfiniteCanvasPage() {
                     selectedCount={selectedNodeIds.size}
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
-                    backgroundMode={backgroundMode}
-                    showImageInfo={showImageInfo}
                     onAddImage={() => createNode(CanvasNodeType.Image)}
                     onAddVideo={() => createNode(CanvasNodeType.Video)}
                     onAddAudio={() => createNode(CanvasNodeType.Audio)}
@@ -860,11 +960,10 @@ function InfiniteCanvasPage() {
                     onDelete={() => deleteNodes(new Set(selectedNodeIds))}
                     onClear={() => setClearConfirmOpen(true)}
                     onDeselect={deselectCanvas}
-                    onBackgroundModeChange={setBackgroundMode}
-                    onShowImageInfoChange={setShowImageInfo}
                     onOpenMyAssets={() => {
                         setAssetPickerOpen(true);
                     }}
+                    onOpenSettings={() => setSettingsOpen(true)}
                 />
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
@@ -943,6 +1042,7 @@ function InfiniteCanvasPage() {
                 </Modal>
 
                 <AssetPickerModal open={assetPickerOpen} onInsert={handleAssetInsert} onClose={() => setAssetPickerOpen(false)} />
+                <SettingsModal open={settingsOpen} sections={canvasSettingsSections} onOpenChange={setSettingsOpen} />
                 {codexCompactAgent && !assistantMounted ? <CanvasLocalAgentPanel headless snapshot={agentSnapshot} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} /> : null}
             </section>
             {assistantMounted ? (
@@ -969,6 +1069,26 @@ function InfiniteCanvasPage() {
     );
 }
 
+function CanvasReferencePickBanner({ onLocateTarget, onExit }: { onLocateTarget: () => void; onExit: () => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    return (
+        <div className="pointer-events-none absolute left-1/2 top-4 z-[80] -translate-x-1/2">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-[20px] border p-2 shadow-2xl backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
+                <span className="grid size-10 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.toolbar.activeText }}>
+                    <MousePointer2 className="size-5" />
+                </span>
+                <span className="px-2 text-base font-semibold whitespace-nowrap">从画布选择参考</span>
+                <button type="button" className="h-10 rounded-xl px-4 text-sm font-medium transition" style={{ background: theme.toolbar.activeBg, color: theme.toolbar.activeText }} onClick={onLocateTarget}>
+                    定位节点
+                </button>
+                <button type="button" className="h-10 rounded-xl px-4 text-sm font-medium transition" style={{ background: theme.node.text, color: theme.canvas.background }} onClick={onExit}>
+                    退出
+                </button>
+            </div>
+        </div>
+    );
+}
+
 function CanvasTopBar({
     title,
     titleDraft,
@@ -989,6 +1109,7 @@ function CanvasTopBar({
     agentOpen,
     compactAgentStatus,
     onToggleAgent,
+    onOpenSettings,
 }: {
     title: string;
     titleDraft: string;
@@ -1009,6 +1130,7 @@ function CanvasTopBar({
     agentOpen: boolean;
     compactAgentStatus?: { connected: boolean; enabled: boolean; activity: string };
     onToggleAgent: () => void;
+    onOpenSettings: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -1080,7 +1202,7 @@ function CanvasTopBar({
 
                 <div className="pointer-events-auto flex items-center gap-1.5">
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
-                    <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
+                    <UserStatusActions variant="canvas" onOpenSettings={onOpenSettings} onOpenShortcuts={() => setShortcutsOpen(true)} />
                     <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
                     <Button
                         type="text"

@@ -8,6 +8,7 @@ import { defaultConfig } from "@/stores/use-config-store";
 import { getDataUrlByteSize } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
+import { useProviderConfigStore, type ProviderConfigCapability, type ProviderModelSelection } from "@/providers/config";
 import { useProviderTaskStore } from "@/providers/task-store";
 import { NODE_DEFAULT_SIZE } from "../../constants";
 import type { CanvasImageAngleParams } from "../../components/canvas-node-angle-dialog";
@@ -49,6 +50,21 @@ const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用�
 1. 只输出提示词正文，不要解释。
 2. 覆盖主体、构图、风格、光线、色彩、材质、镜头和氛围。
 3. 尽量写成可直接用于生图模型的完整提示词。`;
+
+function providerOverrideForNodeType(type: CanvasNodeType): ProviderModelSelection | undefined {
+    if (type === CanvasNodeType.Image) return providerOverrideForCapability("image");
+    if (type === CanvasNodeType.Video) return providerOverrideForCapability("video");
+    if (type === CanvasNodeType.Audio) return providerOverrideForCapability("audio");
+    if (type === CanvasNodeType.Text) return providerOverrideForCapability("text");
+    return undefined;
+}
+
+function providerOverrideForCapability(capability: ProviderConfigCapability): ProviderModelSelection | undefined {
+    const selection = useProviderConfigStore.getState().defaults[capability];
+    const profileId = selection?.profileId?.trim();
+    const modelId = selection?.modelId?.trim();
+    return profileId && modelId ? { profileId, modelId } : undefined;
+}
 
 type Params = any;
 
@@ -117,7 +133,8 @@ export function useCanvasNodeActions(params: Params) {
                           count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                       }
                     : undefined;
-            const newNode = createCanvasNode(type, targetPosition, configMetadata);
+            const providerOverride = providerOverrideForNodeType(type);
+            const newNode = { ...createCanvasNode(type, targetPosition, configMetadata), ...(providerOverride ? { providerOverride } : {}) };
 
             setNodes((prev: CanvasNodeData[]) => [...prev, newNode]);
             setSelectedNodeIds(new Set([newNode.id]));
@@ -252,7 +269,8 @@ export function useCanvasNodeActions(params: Params) {
         const image = await uploadImage(file);
         const size = fitNodeSize(image.width, image.height);
         const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const newNode: CanvasNodeData = { id, type: CanvasNodeType.Image, title: file.name, position: { x: position.x - size.width / 2, y: position.y - size.height / 2 }, width: size.width, height: size.height, metadata: imageMetadata(image) };
+        const imageProviderOverride = providerOverrideForNodeType(CanvasNodeType.Image);
+        const newNode: CanvasNodeData = { id, type: CanvasNodeType.Image, title: file.name, position: { x: position.x - size.width / 2, y: position.y - size.height / 2 }, width: size.width, height: size.height, ...(imageProviderOverride ? { providerOverride: imageProviderOverride } : {}), metadata: imageMetadata(image) };
 
         setNodes((prev: CanvasNodeData[]) => [...prev, newNode]);
         setSelectedNodeIds(new Set([id]));
@@ -264,7 +282,8 @@ export function useCanvasNodeActions(params: Params) {
         const video = await uploadMediaFile(file, "video");
         const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
         const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        setNodes((prev: CanvasNodeData[]) => [...prev, { id, type: CanvasNodeType.Video, title: file.name, position: { x: position.x - size.width / 2, y: position.y - size.height / 2 }, width: size.width, height: size.height, metadata: videoMetadata(video) }]);
+        const videoProviderOverride = providerOverrideForNodeType(CanvasNodeType.Video);
+        setNodes((prev: CanvasNodeData[]) => [...prev, { id, type: CanvasNodeType.Video, title: file.name, position: { x: position.x - size.width / 2, y: position.y - size.height / 2 }, width: size.width, height: size.height, ...(videoProviderOverride ? { providerOverride: videoProviderOverride } : {}), metadata: videoMetadata(video) }]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
@@ -274,7 +293,8 @@ export function useCanvasNodeActions(params: Params) {
         const audio = await uploadMediaFile(file, "audio");
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
         const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        setNodes((prev: CanvasNodeData[]) => [...prev, { id, type: CanvasNodeType.Audio, title: file.name, position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 }, width: spec.width, height: spec.height, metadata: audioMetadata(audio) }]);
+        const audioProviderOverride = providerOverrideForNodeType(CanvasNodeType.Audio);
+        setNodes((prev: CanvasNodeData[]) => [...prev, { id, type: CanvasNodeType.Audio, title: file.name, position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 }, width: spec.width, height: spec.height, ...(audioProviderOverride ? { providerOverride: audioProviderOverride } : {}), metadata: audioMetadata(audio) }]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
     }, []);
@@ -283,7 +303,8 @@ export function useCanvasNodeActions(params: Params) {
         (text: string) => {
             const trimmed = text.trim();
             if (!trimmed) return false;
-            const node = { ...createCanvasNode(CanvasNodeType.Text, getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }), title: trimmed.slice(0, 32) || "剪切板文本" };
+            const providerOverride = providerOverrideForNodeType(CanvasNodeType.Text);
+            const node = { ...createCanvasNode(CanvasNodeType.Text, getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }), ...(providerOverride ? { providerOverride } : {}), title: trimmed.slice(0, 32) || "剪切板文本" };
             setNodes((prev: CanvasNodeData[]) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
@@ -438,6 +459,10 @@ export function useCanvasNodeActions(params: Params) {
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
         setNodes((prev: CanvasNodeData[]) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
+    }, []);
+
+    const handleProviderOverrideChange = useCallback((nodeId: string, value: ProviderModelSelection) => {
+        setNodes((prev: CanvasNodeData[]) => prev.map((node) => (node.id === nodeId ? { ...node, providerOverride: value } : node)));
     }, []);
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
@@ -733,6 +758,7 @@ export function useCanvasNodeActions(params: Params) {
         openTextEditor,
         handleNodePromptChange,
         handleConfigNodeChange,
+        handleProviderOverrideChange,
         downloadNodeImage,
         saveNodeAsset,
         createImageReversePromptNodes,

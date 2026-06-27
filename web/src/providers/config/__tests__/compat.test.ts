@@ -4,7 +4,7 @@ import { beforeEach, test } from "node:test";
 import type { AiConfig } from "@/stores/use-config-store";
 import { aiConfigToProviderRequest } from "../../openai-compat/config-bridge";
 import { ProviderError, ProviderErrorCode } from "../../core/types";
-import { resolveProviderRequestConfig } from "../compat";
+import { resolveProviderRequestConfig, resolveProviderRouting } from "../compat";
 import { useProviderConfigStore } from "../use-provider-config-store";
 
 const config: AiConfig = {
@@ -42,36 +42,9 @@ beforeEach(() => {
     useProviderConfigStore.getState().resetProviderConfig();
 });
 
-test("keeps legacy config active until profile mode is enabled", () => {
+test("uses global default without relying on profile mode", () => {
     useProviderConfigStore.setState({
         mode: "legacy",
-        profiles: {
-            profile1: {
-                id: "profile1",
-                name: "Profile 1",
-                providerId: "openai-compat",
-                baseUrl: "https://profile.test",
-                apiKey: "profile-key",
-                apiFormat: "openai",
-                models: ["profile-image"],
-                createdAt: "2026-01-01T00:00:00.000Z",
-                updatedAt: "2026-01-01T00:00:00.000Z",
-            },
-        },
-        defaults: { image: { profileId: "profile1", modelId: "profile-image" } },
-    });
-
-    const result = resolveProviderRequestConfig(config, config.imageModel, "image");
-
-    assert.equal(result.baseUrl, "https://legacy.test");
-    assert.equal(result.apiKey, "legacy-key");
-    assert.equal(result.model, "legacy-image");
-    assert.equal(result.providerId, undefined);
-});
-
-test("uses provider profile only after profile mode is enabled", () => {
-    useProviderConfigStore.setState({
-        mode: "profiles",
         profiles: {
             profile1: {
                 id: "profile1",
@@ -95,6 +68,113 @@ test("uses provider profile only after profile mode is enabled", () => {
     assert.equal(result.baseUrl, "https://profile.test");
     assert.equal(result.apiKey, "profile-key");
     assert.equal(result.model, "profile-image");
+});
+
+test("node override wins over global default", () => {
+    useProviderConfigStore.setState({
+        mode: "legacy",
+        profiles: {
+            global: {
+                id: "global",
+                name: "Global Profile",
+                providerId: "openai-compat",
+                baseUrl: "https://global.test",
+                apiKey: "global-key",
+                apiFormat: "openai",
+                models: ["global-image"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+            node: {
+                id: "node",
+                name: "Node Profile",
+                providerId: "openai-compat",
+                baseUrl: "https://node.test",
+                apiKey: "node-key",
+                apiFormat: "openai",
+                models: ["node-image"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+        defaults: { image: { profileId: "global", modelId: "global-image" } },
+    });
+
+    const result = resolveProviderRequestConfig(config, config.imageModel, "image", { providerOverride: { profileId: "node", modelId: "node-image" } });
+
+    assert.equal(result.profileId, "node");
+    assert.equal(result.providerId, "openai-compat");
+    assert.equal(result.baseUrl, "https://node.test");
+    assert.equal(result.apiKey, "node-key");
+    assert.equal(result.model, "node-image");
+});
+
+test("falls back to legacy when capability has no default or override", () => {
+    useProviderConfigStore.setState({ mode: "legacy", profiles: {}, defaults: {} });
+
+    const result = resolveProviderRequestConfig(config, config.imageModel, "image");
+
+    assert.equal(result.baseUrl, "https://legacy.test");
+    assert.equal(result.apiKey, "legacy-key");
+    assert.equal(result.model, "legacy-image");
+    assert.equal(result.providerId, undefined);
+    assert.deepEqual(resolveProviderRouting("image"), { type: "legacy" });
+});
+
+test("throws clear error when node override profile is disabled or deleted", () => {
+    useProviderConfigStore.setState({
+        mode: "legacy",
+        profiles: {
+            disabled: {
+                id: "disabled",
+                name: "Disabled Profile",
+                providerId: "openai-compat",
+                enabled: false,
+                baseUrl: "https://disabled.test",
+                apiKey: "disabled-key",
+                apiFormat: "openai",
+                models: ["disabled-image"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+        defaults: {},
+    });
+
+    assert.throws(
+        () => resolveProviderRequestConfig(config, config.imageModel, "image", { providerOverride: { profileId: "disabled", modelId: "disabled-image" } }),
+        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.InvalidRequest && error.message === "节点指定的 Profile 已被禁用/删除，请重新选择",
+    );
+    assert.throws(
+        () => resolveProviderRequestConfig(config, config.imageModel, "image", { providerOverride: { profileId: "deleted", modelId: "deleted-image" } }),
+        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.InvalidRequest && error.message === "节点指定的 Profile 已被禁用/删除，请重新选择",
+    );
+});
+
+test("throws clear error when global default profile is disabled or deleted", () => {
+    useProviderConfigStore.setState({
+        mode: "legacy",
+        profiles: {
+            disabled: {
+                id: "disabled",
+                name: "Disabled Profile",
+                providerId: "openai-compat",
+                enabled: false,
+                baseUrl: "https://disabled.test",
+                apiKey: "disabled-key",
+                apiFormat: "openai",
+                models: ["disabled-image"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+        defaults: { image: { profileId: "disabled", modelId: "disabled-image" } },
+    });
+
+    assert.throws(
+        () => resolveProviderRequestConfig(config, config.imageModel, "image"),
+        (error) => error instanceof ProviderError && error.code === ProviderErrorCode.InvalidRequest && error.message === "默认模型指定的 Profile 已被禁用/删除，请重新配置",
+    );
 });
 
 test("marks profiles without providerId as needing explicit configuration", () => {
@@ -147,6 +227,46 @@ test("uses manifest auth requirements for runnable profiles", () => {
     assert.equal(result.providerId, "grsai");
     assert.equal(result.apiKey, "grsai-key");
     assert.equal(result.needsProviderConfiguration, undefined);
+});
+
+test("provider request uses node override profile and model over global default", () => {
+    useProviderConfigStore.setState({
+        mode: "legacy",
+        profiles: {
+            global: {
+                id: "global",
+                name: "Global Profile",
+                providerId: "openai-compat",
+                baseUrl: "https://global.test",
+                apiKey: "global-key",
+                apiFormat: "openai",
+                models: ["global-image"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+            node: {
+                id: "node",
+                name: "Node Profile",
+                providerId: "openai-compat",
+                baseUrl: "https://node.test",
+                apiKey: "node-key",
+                apiFormat: "openai",
+                models: ["node-image"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+        defaults: { image: { profileId: "global", modelId: "global-image" } },
+    });
+
+    const request = aiConfigToProviderRequest(config, "image", { prompt: "hello" }, { providerOverride: { profileId: "node", modelId: "node-image" } });
+
+    assert.equal(request.profileId, "node");
+    assert.equal(request.providerId, "openai-compat");
+    assert.equal(request.modelId, "node-image");
+    assert.equal(request.params.model, "node-image");
+    assert.equal(request.params.baseUrl, "https://node.test");
+    assert.equal(request.params.apiKey, "node-key");
 });
 
 test("blocks provider requests when profile mode default is incomplete", () => {

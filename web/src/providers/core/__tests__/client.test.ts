@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 
+import { useProviderConfigStore } from "../../config";
 import { useProviderTaskStore } from "../../task-store";
 import { createProviderClient } from "../client";
 import { createProviderRegistry } from "../registry";
@@ -32,6 +33,11 @@ const request: GenerateRequest<{ readonly prompt: string }> = {
     pendingId: "pending-1",
 };
 
+beforeEach(() => {
+    useProviderConfigStore.getState().resetProviderConfig();
+    useProviderTaskStore.getState().resetTasks();
+});
+
 test("calls a registered adapter with injected context", async () => {
     const registry = createProviderRegistry();
     const fetchMock: ProviderFetch = async () => new Response("ok");
@@ -61,6 +67,43 @@ test("calls a registered adapter with injected context", async () => {
     assert.deepEqual(receivedParams, { prompt: "hello" });
     assert.equal(result.providerId, "mock");
     assert.deepEqual(result.outputs, [{ type: "text", text: "hello" }]);
+});
+
+test("records profile model usage only after successful generation", async () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "Mock Profile", providerId: "mock", auth: {}, models: [] });
+    const registry = createProviderRegistry();
+    registry.register({
+        manifest,
+        async generate(generateRequest) {
+            return {
+                providerId: manifest.id,
+                capability: generateRequest.capability,
+                modelId: generateRequest.modelId,
+                outputs: [{ type: "text", text: "ok" }],
+            };
+        },
+    });
+
+    const client = createProviderClient({ registry });
+    await client.generate("mock", { ...request, profileId: profile.id });
+
+    assert.deepEqual(useProviderConfigStore.getState().profiles[profile.id].recentlyUsedModels?.map((item) => ({ modelId: item.modelId, count: item.count })), [{ modelId: "mock-text", count: 1 }]);
+});
+
+test("does not record model usage when generation fails", async () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "Mock Profile", providerId: "mock", auth: {}, models: [] });
+    const registry = createProviderRegistry();
+    registry.register({
+        manifest,
+        async generate() {
+            throw new Error("adapter failed");
+        },
+    });
+
+    const client = createProviderClient({ registry });
+    await assert.rejects(() => client.generate("mock", { ...request, profileId: profile.id }));
+
+    assert.equal(useProviderConfigStore.getState().profiles[profile.id].recentlyUsedModels, undefined);
 });
 
 test("does not create task records without pendingId", async () => {

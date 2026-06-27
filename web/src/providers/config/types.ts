@@ -2,7 +2,7 @@ import type { ModelInfo } from "../core/types";
 import type { ApiCallFormat } from "@/stores/use-config-store";
 
 export const PROVIDER_CONFIG_STORE_KEY = "infinite-canvas:provider_config_store";
-export const PROVIDER_CONFIG_MIGRATION_VERSION = 1;
+export const PROVIDER_CONFIG_MIGRATION_VERSION = 2;
 
 export type ProviderConfigCapability = "image" | "video" | "text" | "audio";
 export type ProviderConfigMode = "legacy" | "profiles";
@@ -15,6 +15,12 @@ export type ProviderModelSelection = {
 export type ProviderProfileSource = {
     readonly type: "legacy-ai-config";
     readonly channelId: string;
+};
+
+export type ProviderModelUsage = {
+    readonly modelId: string;
+    readonly count: number;
+    readonly lastUsedAt: number;
 };
 
 export type ProviderProfile = {
@@ -30,7 +36,7 @@ export type ProviderProfile = {
     readonly cachedModels?: readonly ModelInfo[];
     readonly modelsFetchedAt?: number;
     readonly modelsFetchError?: string;
-    readonly recentlyUsedModels?: readonly string[];
+    readonly recentlyUsedModels?: readonly ProviderModelUsage[];
     readonly source?: ProviderProfileSource;
     readonly createdAt: string;
     readonly updatedAt: string;

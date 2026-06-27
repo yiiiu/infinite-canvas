@@ -7,7 +7,9 @@ import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audi
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { uploadImage } from "@/services/image-storage";
 import { defaultProviderClient } from "@/providers";
-import { scanProviderTaskRecovery, TaskStatus, useProviderTaskStore, type ProviderTaskContext } from "@/providers/task-store";
+import { useProviderConfigStore, type ProviderConfigCapability, type ProviderModelSelection } from "@/providers/config";
+import { scanProviderTaskRecovery } from "@/providers/task-store/task-recovery";
+import { TaskStatus, useProviderTaskStore, type ProviderTaskContext } from "@/providers/task-store";
 import { normalizeProviderError } from "@/providers/core/error-normalize";
 import { proxyFetch } from "@/providers/core/proxy-fetch";
 import { isNewProviderEnabled } from "@/providers/feature-flags";
@@ -79,6 +81,7 @@ const NODE_STATUS_ERROR = "error" as const;
 function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const providerOverride = providerOverrideForNodeType(type);
     return {
         id,
         type,
@@ -86,11 +89,31 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
         position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
         width: spec.width,
         height: spec.height,
+        ...(providerOverride ? { providerOverride } : {}),
         metadata: { ...spec.metadata, ...metadata },
     };
 }
 
-async function generateImageResult(config: AiConfig, prompt: string, references: ReferenceImage[], signal: AbortSignal, task?: CanvasProviderTask): Promise<{ dataUrl: string | Blob }> {
+function providerOverrideForNodeType(type: CanvasNodeType): ProviderModelSelection | undefined {
+    if (type === CanvasNodeType.Image) return providerOverrideForCapability("image");
+    if (type === CanvasNodeType.Video) return providerOverrideForCapability("video");
+    if (type === CanvasNodeType.Audio) return providerOverrideForCapability("audio");
+    if (type === CanvasNodeType.Text) return providerOverrideForCapability("text");
+    return undefined;
+}
+
+function providerOverrideForCapability(capability: ProviderConfigCapability): ProviderModelSelection | undefined {
+    const selection = useProviderConfigStore.getState().defaults[capability];
+    const profileId = selection?.profileId?.trim();
+    const modelId = selection?.modelId?.trim();
+    return profileId && modelId ? { profileId, modelId } : undefined;
+}
+
+function providerIdForRequest(request: { readonly providerId?: string; readonly params: { readonly baseUrl?: unknown } }) {
+    return request.providerId || providerIdForParams(request.params);
+}
+
+async function generateImageResult(config: AiConfig, prompt: string, references: ReferenceImage[], signal: AbortSignal, task?: CanvasProviderTask, providerOverride?: ProviderModelSelection): Promise<{ dataUrl: string | Blob }> {
     if (shouldUseProvider(config, "image")) {
         const referenceImages = references
             .map(providerReferenceImageUrl)
@@ -100,8 +123,8 @@ async function generateImageResult(config: AiConfig, prompt: string, references:
             prompt,
             count: 1,
             ...(referenceImages.length ? { referenceImages } : {}),
-        });
-        const result = await defaultProviderClient.generate(providerIdForParams(providerRequest.params), { ...providerRequest, signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
+        }, { providerOverride });
+        const result = await defaultProviderClient.generate(providerIdForRequest(providerRequest), { ...providerRequest, signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
         const image = result.outputs.find((output) => output.type === "image");
         if (image?.dataUrl) return { dataUrl: image.dataUrl };
         if (image?.url) return { dataUrl: await (await proxyFetch(image.url, { signal })).blob() };
@@ -146,9 +169,10 @@ function providerIdForParams(params: { readonly baseUrl?: unknown }) {
     return baseUrl.includes("grsai") ? "grsai" : "openai-compat";
 }
 
-async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal, task?: CanvasProviderTask): Promise<UploadedFile> {
+async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal, task?: CanvasProviderTask, providerOverride?: ProviderModelSelection): Promise<UploadedFile> {
     if (shouldUseProvider(config, "audio")) {
-        const result = await defaultProviderClient.generate("openai-compat", { ...aiConfigToProviderRequest(config, "audio", { input: prompt }), signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
+        const providerRequest = aiConfigToProviderRequest(config, "audio", { input: prompt }, { providerOverride });
+        const result = await defaultProviderClient.generate(providerIdForRequest(providerRequest), { ...providerRequest, signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
         const audio = result.outputs.find((output) => output.type === "audio");
         if (audio?.blob) return storeGeneratedAudio(audio.blob, config.audioFormat);
         if (audio?.url) return storeGeneratedAudio(await (await proxyFetch(audio.url, { signal })).blob(), config.audioFormat);
@@ -254,7 +278,9 @@ export function useCanvasGeneration({
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            const imageProviderOverride = mode === "image" ? (sourceNode?.type === CanvasNodeType.Image ? sourceNode.providerOverride || providerOverrideForCapability("image") : providerOverrideForCapability("image")) : undefined;
+            const usesImageProviderRouting = mode === "image" && shouldUseProvider(generationConfig, "image") && Boolean(imageProviderOverride);
+            if (!usesImageProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -314,6 +340,7 @@ export function useCanvasGeneration({
                         },
                         width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
                         height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
+                        ...(imageProviderOverride ? { providerOverride: imageProviderOverride } : {}),
                         metadata: {
                             prompt: effectivePrompt,
                             status: NODE_STATUS_LOADING,
@@ -334,6 +361,7 @@ export function useCanvasGeneration({
                         },
                         width: imageConfig.width,
                         height: imageConfig.height,
+                        ...(imageProviderOverride ? { providerOverride: imageProviderOverride } : {}),
                         metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
                     }));
                     const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
@@ -373,7 +401,7 @@ export function useCanvasGeneration({
                                 setNodeTaskMetadata(setNodes, targetId, task.pendingId, TaskStatus.Pending);
                             }
                             try {
-                                const image = await generateImageResult(generationConfig, effectivePrompt, referenceImages, controller.signal, task);
+                                const image = await generateImageResult(generationConfig, effectivePrompt, referenceImages, controller.signal, task, imageProviderOverride);
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
@@ -435,6 +463,7 @@ export function useCanvasGeneration({
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
+                    const videoProviderOverride = providerOverrideForCapability("video");
                     const videoNode: CanvasNodeData = {
                         id: videoId,
                         type: CanvasNodeType.Video,
@@ -442,6 +471,7 @@ export function useCanvasGeneration({
                         position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
                         width: isEmptyVideoNode ? sourceNode.width : spec.width,
                         height: isEmptyVideoNode ? sourceNode.height : spec.height,
+                        ...(videoProviderOverride ? { providerOverride: videoProviderOverride } : {}),
                         metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) },
                     };
                     pendingChildIds = [videoId];
@@ -463,6 +493,7 @@ export function useCanvasGeneration({
                     const isEmptyAudioNode = sourceNode?.type === CanvasNodeType.Audio && !sourceNode.metadata?.content;
                     const audioId = isEmptyAudioNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
+                    const audioProviderOverride = providerOverrideForCapability("audio");
                     const audioNode: CanvasNodeData = {
                         id: audioId,
                         type: CanvasNodeType.Audio,
@@ -470,6 +501,7 @@ export function useCanvasGeneration({
                         position: isEmptyAudioNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 },
                         width: isEmptyAudioNode ? sourceNode.width : spec.width,
                         height: isEmptyAudioNode ? sourceNode.height : spec.height,
+                        ...(audioProviderOverride ? { providerOverride: audioProviderOverride } : {}),
                         metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
                     };
                     pendingChildIds = [audioId];
@@ -482,7 +514,7 @@ export function useCanvasGeneration({
                         setNodeTaskMetadata(setNodes, audioId, task.pendingId, TaskStatus.Pending);
                     }
                     try {
-                        const audio = await generateAudioResult(generationConfig, effectivePrompt, controller.signal, task);
+                        const audio = await generateAudioResult(generationConfig, effectivePrompt, controller.signal, task, audioProviderOverride);
                         setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
                         if (task) {
                             useProviderTaskStore.getState().markWritten(task.pendingId);
@@ -504,6 +536,7 @@ export function useCanvasGeneration({
                 const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
                 const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                 const childIds = isConfigNode || editingTextNode ? Array.from({ length: textCount }, () => nanoid()) : [];
+                const textProviderOverride = providerOverrideForCapability("text");
                 pendingChildIds = childIds;
                 if (isConfigNode || editingTextNode) {
                     const childNodes: CanvasNodeData[] = childIds.map((id, index) => ({
@@ -516,6 +549,7 @@ export function useCanvasGeneration({
                         },
                         width: textConfig.width,
                         height: textConfig.height,
+                        ...(textProviderOverride ? { providerOverride: textProviderOverride } : {}),
                         metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, fontSize: 14 },
                     }));
                     setNodes((prev) => [...prev.map((node) => (node.id === nodeId && isConfigNode ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes]);
@@ -545,7 +579,7 @@ export function useCanvasGeneration({
                             : node.id === nodeId && isConfigNode
                               ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } }
                               : node.id === nodeId && !editingTextNode
-                                ? { ...node, type: CanvasNodeType.Text, title: prompt.slice(0, 32) || "Generated Text", metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
+                                ? { ...node, type: CanvasNodeType.Text, title: prompt.slice(0, 32) || "Generated Text", ...(textProviderOverride ? { providerOverride: textProviderOverride } : {}), metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
                                 : node,
                     ),
                 );
@@ -628,7 +662,9 @@ export function useCanvasGeneration({
                           count: "1",
                       }
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            const retryImageProviderOverride = node.type === CanvasNodeType.Image ? node.providerOverride || providerOverrideForCapability("image") : undefined;
+            const usesImageProviderRouting = node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image") && Boolean(retryImageProviderOverride);
+            if (!usesImageProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -677,7 +713,7 @@ export function useCanvasGeneration({
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const audio = await generateAudioResult(generationConfig, prompt, controller.signal, retryTask);
+                    const audio = await generateAudioResult(generationConfig, prompt, controller.signal, retryTask, node.providerOverride);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
                     if (retryTask) {
                         useProviderTaskStore.getState().markWritten(retryTask.pendingId);
@@ -686,7 +722,7 @@ export function useCanvasGeneration({
                     return;
                 }
 
-                const image = await generateImageResult(generationConfig, prompt, useReferenceImages ? retryImages : [], controller.signal, retryTask);
+                const image = await generateImageResult(generationConfig, prompt, useReferenceImages ? retryImages : [], controller.signal, retryTask, retryImageProviderOverride);
                 const uploadedImage = await uploadImage(image.dataUrl);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);

@@ -27,7 +27,7 @@ test("migrates legacy channels into provider profiles and defaults", () => {
         new Date("2026-01-01T00:00:00.000Z"),
     );
 
-    assert.equal(result.migrationVersion, 1);
+    assert.equal(result.migrationVersion, 2);
     assert.equal(result.mode, "legacy");
     assert.equal(result.profiles["legacy-default"].providerId, "openai-compat");
     assert.equal(result.profiles["legacy-grsai"].providerId, "grsai");
@@ -76,7 +76,7 @@ test("maps raw legacy model only when it matches exactly one channel", () => {
     assert.equal(resolveLegacyModelSelection("missing", channels), undefined);
 });
 
-test("keeps migration one-shot after version is recorded", () => {
+test("reshapes version 1 provider config without recreating profiles", () => {
     const current: ProviderConfigData = {
         migrationVersion: 1,
         mode: "profiles",
@@ -86,6 +86,7 @@ test("keeps migration one-shot after version is recorded", () => {
                 name: "Existing",
                 providerId: "openai-compat",
                 models: [],
+                recentlyUsedModels: ["gpt-4.1", "gpt-image-1"] as unknown as never,
                 createdAt: "2026-01-01T00:00:00.000Z",
                 updatedAt: "2026-01-01T00:00:00.000Z",
             },
@@ -101,7 +102,12 @@ test("keeps migration one-shot after version is recorded", () => {
         current,
     );
 
-    assert.equal(result, current);
+    assert.equal(result.migrationVersion, 2);
+    assert.deepEqual(Object.keys(result.profiles), ["existing"]);
+    assert.deepEqual(result.profiles.existing.recentlyUsedModels, [
+        { modelId: "gpt-4.1", count: 1, lastUsedAt: 0 },
+        { modelId: "gpt-image-1", count: 1, lastUsedAt: 0 },
+    ]);
 });
 
 test("treats missing migrationVersion as not migrated", () => {
@@ -113,7 +119,7 @@ test("treats missing migrationVersion as not migrated", () => {
         { mode: "legacy", profiles: {}, defaults: {} },
     );
 
-    assert.equal(result.migrationVersion, 1);
+    assert.equal(result.migrationVersion, 2);
     assert.deepEqual(result.defaults.image, { profileId: "legacy-default", modelId: "gpt-image-2" });
 });
 

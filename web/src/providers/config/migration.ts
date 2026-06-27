@@ -1,5 +1,5 @@
 import type { AiConfig, ModelChannel } from "@/stores/use-config-store";
-import { PROVIDER_CONFIG_MIGRATION_VERSION, type ProviderConfigCapability, type ProviderConfigData, type ProviderModelSelection, type ProviderProfile } from "./types";
+import { PROVIDER_CONFIG_MIGRATION_VERSION, type ProviderConfigCapability, type ProviderConfigData, type ProviderModelSelection, type ProviderModelUsage, type ProviderProfile } from "./types";
 
 type LegacyModelField = "imageModel" | "videoModel" | "textModel" | "model" | "audioModel";
 
@@ -11,8 +11,10 @@ const MODEL_SEPARATOR = "::";
 export function migrateAiConfigToProviderConfig(input: MigrationInput, current: MigrationState, now = new Date()): ProviderConfigData {
     const currentVersion = current.migrationVersion ?? 0;
     if (currentVersion >= PROVIDER_CONFIG_MIGRATION_VERSION) {
-        if (current.migrationVersion === currentVersion && current.mode) return current as ProviderConfigData;
-        return { ...current, migrationVersion: currentVersion, mode: current.mode ?? "legacy" };
+        return normalizeProviderConfigData({ ...current, migrationVersion: currentVersion, mode: current.mode ?? "legacy" });
+    }
+    if (currentVersion >= 1) {
+        return normalizeProviderConfigData({ ...current, migrationVersion: PROVIDER_CONFIG_MIGRATION_VERSION, mode: current.mode ?? "legacy" });
     }
 
     const timestamp = now.toISOString();
@@ -30,6 +32,30 @@ export function migrateAiConfigToProviderConfig(input: MigrationInput, current: 
             ...defaultSelection("audio", input.audioModel, channels),
         },
     };
+}
+
+export function normalizeProviderConfigData(state: MigrationState): ProviderConfigData {
+    return {
+        migrationVersion: Math.max(state.migrationVersion ?? PROVIDER_CONFIG_MIGRATION_VERSION, PROVIDER_CONFIG_MIGRATION_VERSION),
+        mode: state.mode ?? "legacy",
+        profiles: Object.fromEntries(Object.entries(state.profiles || {}).map(([id, profile]) => [id, normalizeProfile(profile)])),
+        defaults: state.defaults || {},
+    };
+}
+
+function normalizeProfile(profile: ProviderProfile): ProviderProfile {
+    return { ...profile, recentlyUsedModels: normalizeRecentlyUsedModels(profile.recentlyUsedModels) };
+}
+
+function normalizeRecentlyUsedModels(value: unknown): readonly ProviderModelUsage[] | undefined {
+    if (!Array.isArray(value) || !value.length) return undefined;
+    if (value.every((item) => typeof item === "string")) {
+        return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean))).map((modelId) => ({ modelId, count: 1, lastUsedAt: 0 }));
+    }
+    return value
+        .filter((item): item is ProviderModelUsage => Boolean(item) && typeof item === "object" && typeof (item as ProviderModelUsage).modelId === "string")
+        .map((item) => ({ modelId: item.modelId.trim(), count: Math.max(1, Number(item.count) || 1), lastUsedAt: Number(item.lastUsedAt) || 0 }))
+        .filter((item) => item.modelId);
 }
 
 function createProfile(channel: ModelChannel, index: number, timestamp: string): ProviderProfile {
