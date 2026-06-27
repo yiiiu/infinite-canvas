@@ -493,7 +493,7 @@ function InfiniteCanvasPage() {
     }, [referencePickTargetNodeId, setContextMenu, setDialogNodeId, setSelectedConnectionId, setSelectedNodeIds, setViewport, size.height, size.width, viewportRef]);
 
     const visibleNodes = useMemo(() => {
-        const padding = 280;
+        const padding = 1500;
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
