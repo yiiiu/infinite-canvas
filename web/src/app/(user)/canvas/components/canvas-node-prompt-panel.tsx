@@ -277,7 +277,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
-        count: String(mode === "image" ? clampCanvasImageCount(node.metadata?.count || globalConfig.canvasImageCount || globalConfig.count || defaultConfig.count) : node.metadata?.count || globalConfig.count || defaultConfig.count),
+        count: String(mode === "image" ? clampCanvasImageCount(node.metadata?.count ?? 1) : node.metadata?.count || globalConfig.count || defaultConfig.count),
     };
 }
 
