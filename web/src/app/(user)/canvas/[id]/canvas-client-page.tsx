@@ -394,6 +394,7 @@ function InfiniteCanvasPage() {
         setToolbarNodeId,
         setDialogNodeId,
         setEditingNodeId,
+        keepNodeToolbar,
         cancelPendingConnectionCreateRef,
         connectingParamsRef,
         pendingConnectionCreateRef,
@@ -877,12 +878,9 @@ function InfiniteCanvasPage() {
                             onHoverStart={(nodeId) => {
                                 if (nodeDraggingRef.current) return;
                                 setHoveredNodeId(nodeId);
-                                if (referencePickTargetNodeId) return;
-                                keepNodeToolbar(nodeId);
                             }}
                             onHoverEnd={(nodeId) => {
                                 setHoveredNodeId((current) => (current === nodeId ? null : current));
-                                hideNodeToolbar();
                             }}
                             onConnectStart={handleConnectStart}
                             onResize={handleNodeResize}

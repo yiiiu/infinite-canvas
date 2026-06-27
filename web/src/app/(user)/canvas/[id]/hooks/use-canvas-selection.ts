@@ -24,6 +24,7 @@ type Params = {
     setToolbarNodeId: Dispatch<SetStateAction<string | null>>;
     setDialogNodeId: Dispatch<SetStateAction<string | null>>;
     setEditingNodeId: Dispatch<SetStateAction<string | null>>;
+    keepNodeToolbar: (nodeId: string) => void;
     // forward refs updated after connections hook
     cancelPendingConnectionCreateRef: { current: () => void };
     connectingParamsRef: { current: ConnectionHandle | null };
@@ -55,6 +56,7 @@ export function useCanvasSelection({
     setToolbarNodeId,
     setDialogNodeId,
     setEditingNodeId,
+    keepNodeToolbar,
     cancelPendingConnectionCreateRef,
     connectingParamsRef,
     pendingConnectionCreateRef,
@@ -122,7 +124,6 @@ export function useCanvasSelection({
         event.stopPropagation();
         setContextMenu(null);
         setHoveredNodeId(null);
-        setToolbarNodeId(null);
         setSelectedConnectionId(null);
 
         const currentSelected = selectedNodeIdsRef.current;
@@ -186,6 +187,7 @@ export function useCanvasSelection({
 
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
+            keepNodeToolbar(clickedNodeId);
             if (clickedNode?.type === CanvasNodeType.Text) {
                 setDialogNodeId((current) => (current === clickedNodeId ? current : null));
             } else {

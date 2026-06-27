@@ -218,8 +218,20 @@ export function ImageToolSettingsModal({
 }
 
 function PreviewToolbarItem({ tool, showLabels }: { tool: PreviewTool; showLabels: boolean }) {
+    const { token } = antdTheme.useToken();
     return (
-        <Tooltip title={tool.title}>
+        <Tooltip
+            title={tool.title}
+            color={token.colorBgElevated}
+            overlayInnerStyle={{
+                color: token.colorText,
+                fontSize: '13px',
+                fontWeight: 500,
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: `1px solid ${token.colorBorderSecondary}`,
+            }}
+        >
             <span className="flex h-12 shrink-0 items-center px-1.5" style={{ color: tool.danger ? "#ef4444" : undefined }}>
                 <span className={`flex h-9 items-center rounded-lg px-2 ${showLabels ? "gap-2" : "justify-center"}`}>
                     {tool.icon}
