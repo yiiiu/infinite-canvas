@@ -65,43 +65,50 @@ export function CapabilityRow({ capability, profiles, selection, onChange }: Cap
     };
 
     return (
-        <div className="grid gap-3 border-t border-stone-200 px-4 py-4 first:border-t-0 dark:border-stone-800 md:grid-cols-[80px_120px_minmax(180px,260px)_minmax(220px,1fr)_72px] md:items-center">
-            <div className="flex items-center gap-2">
-                <span className={`size-2.5 shrink-0 rounded-full border ${saved ? "border-emerald-500 bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)] dark:border-emerald-400 dark:bg-emerald-400" : "border-stone-400 bg-transparent dark:border-stone-500"}`} aria-label={saved ? "已配置" : "未配置"} />
-            </div>
-
-            <div className="min-w-0">
-                <div className="text-sm font-medium text-stone-950 dark:text-stone-100">{capability.title}</div>
-                <div className="mt-0.5 text-xs text-stone-400 md:hidden">{capability.description}</div>
-            </div>
-
-            <label className="grid gap-1.5 md:block">
-                <span className="text-xs font-medium text-stone-500 md:hidden">配置档</span>
-                {profileOptions.length ? (
-                    <Select value={selectedProfile?.id} onValueChange={updateProfile}>
-                        <SelectTrigger className="h-9 w-full bg-white dark:bg-stone-900">
-                            <SelectValue placeholder="选择配置档" />
-                        </SelectTrigger>
-                        <SelectContent className="z-[1100]">
-                            {profileOptions.map((profile) => (
-                                <SelectItem key={profile.id} value={profile.id} textValue={profileLabel(profile)}>
-                                    {profileLabel(profile)}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                ) : (
-                    <div className="rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs text-stone-400 dark:border-stone-700">暂无支持该能力的配置档</div>
+        <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950">
+            <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                    <span className={`mt-0.5 size-2.5 shrink-0 rounded-full border ${saved ? "border-emerald-500 bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)] dark:border-emerald-400 dark:bg-emerald-400" : "border-stone-400 bg-transparent dark:border-stone-500"}`} aria-label={saved ? "已配置" : "未配置"} />
+                    <div className="min-w-0">
+                        <div className="text-sm font-medium text-stone-950 dark:text-stone-100">{capability.title}</div>
+                        <div className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">{capability.description}</div>
+                    </div>
+                </div>
+                {saved && (
+                    <Button
+                        aria-label="清空"
+                        className="!flex size-8 shrink-0 items-center justify-center !border-red-200 !bg-red-50 !text-red-500 hover:!border-red-300 hover:!bg-red-100 dark:!border-red-900/40 dark:!bg-red-950/30 dark:!text-red-300"
+                        icon={<Trash2 className="size-4" />}
+                        onClick={clear}
+                    />
                 )}
-            </label>
+            </div>
 
-            <label className="grid gap-1.5 md:block">
-                <span className="text-xs font-medium text-stone-500 md:hidden">模型</span>
-                <ModelPicker profileId={selectedProfile?.id || ""} providerId={selectedProfile?.providerId} capability={capability.id} value={modelId} onChange={updateModel} />
-            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5">
+                    <span className="text-xs font-medium text-stone-500 dark:text-stone-400">配置档</span>
+                    {profileOptions.length ? (
+                        <Select value={selectedProfile?.id} onValueChange={updateProfile}>
+                            <SelectTrigger className="h-9 w-full bg-white dark:bg-stone-900">
+                                <SelectValue placeholder="选择配置档" />
+                            </SelectTrigger>
+                            <SelectContent className="z-[1100]">
+                                {profileOptions.map((profile) => (
+                                    <SelectItem key={profile.id} value={profile.id} textValue={profileLabel(profile)}>
+                                        {profileLabel(profile)}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    ) : (
+                        <div className="rounded-lg border border-dashed border-stone-300 px-3 py-2 text-xs text-stone-400 dark:border-stone-700">暂无支持该能力的配置档</div>
+                    )}
+                </label>
 
-            <div className="flex items-center md:justify-end">
-                {saved ? <Button aria-label="清空" className="!flex size-8 items-center justify-center !border-red-200 !bg-red-50 !text-red-500 hover:!border-red-300 hover:!bg-red-100 dark:!border-red-900/40 dark:!bg-red-950/30 dark:!text-red-300" icon={<Trash2 className="size-4" />} onClick={clear} /> : null}
+                <label className="grid gap-1.5">
+                    <span className="text-xs font-medium text-stone-500 dark:text-stone-400">模型</span>
+                    <ModelPicker profileId={selectedProfile?.id || ""} providerId={selectedProfile?.providerId} capability={capability.id} value={modelId} onChange={updateModel} />
+                </label>
             </div>
         </div>
     );
