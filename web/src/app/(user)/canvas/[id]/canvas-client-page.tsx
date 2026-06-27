@@ -384,6 +384,7 @@ function InfiniteCanvasPage() {
         selectedNodeIdsRef,
         selectionBoxRef,
         nodesRef,
+        connectionsRef,
         setNodes,
         historyPausedRef,
         nodeDraggingRef,

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import type { Dispatch, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from "react";
-import { CanvasNodeType, type CanvasNodeData, type ConnectionHandle, type ContextMenuState, type Position, type SelectionBox, type ViewportTransform } from "../../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ConnectionHandle, type ContextMenuState, type Position, type SelectionBox, type ViewportTransform } from "../../types";
 import type { PendingConnectionCreate } from "./use-canvas-connections";
 import { isHiddenBatchChild } from "../../utils/canvas-node-config";
+import { computeConnectionPathD } from "../../components/canvas-connections";
 
 type Params = {
     selectedNodeIds: Set<string>;
@@ -14,6 +15,7 @@ type Params = {
     selectedNodeIdsRef: { current: Set<string> };
     selectionBoxRef: { current: SelectionBox | null };
     nodesRef: { current: CanvasNodeData[] };
+    connectionsRef: { current: CanvasConnection[] };
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     historyPausedRef: { current: boolean };
     nodeDraggingRef: { current: boolean };
@@ -46,6 +48,7 @@ export function useCanvasSelection({
     selectedNodeIdsRef,
     selectionBoxRef,
     nodesRef,
+    connectionsRef,
     setNodes,
     historyPausedRef,
     nodeDraggingRef,
@@ -77,6 +80,14 @@ export function useCanvasSelection({
         initialSelectedNodes: { id: string; x: number; y: number }[];
     }>({ isDraggingNode: false, hasMoved: false, startX: 0, startY: 0, initialSelectedNodes: [] });
     const rafRef = useRef<number | null>(null);
+    const draggingElementsRef = useRef<Array<{ el: HTMLElement; initialX: number; initialY: number }>>([]);
+    const draggingConnectionsRef = useRef<
+        Array<{
+            pathEls: HTMLElement[];
+            fromNode: { id: string; initialX: number; initialY: number; width: number; height: number; isDragged: boolean };
+            toNode: { id: string; initialX: number; initialY: number; width: number; height: number; isDragged: boolean };
+        }>
+    >([]);
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreateRef.current();
@@ -150,6 +161,51 @@ export function useCanvasSelection({
             startY: event.clientY,
             initialSelectedNodes: currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y })),
         };
+
+        // Collect DOM references for direct manipulation during drag
+        draggingElementsRef.current = dragRef.current.initialSelectedNodes
+            .map(({ id, x, y }) => {
+                const el = document.querySelector<HTMLElement>(`[data-node-id="${id}"]`);
+                return el ? { el, initialX: x, initialY: y } : null;
+            })
+            .filter(Boolean) as Array<{ el: HTMLElement; initialX: number; initialY: number }>;
+
+        // Collect connection DOM references for direct path updates during drag
+        const draggedIds = new Set(dragRef.current.initialSelectedNodes.map((n) => n.id));
+        const allNodes = currentNodes;
+        const involvedConnections = connectionsRef.current.filter((c) => draggedIds.has(c.fromNodeId) || draggedIds.has(c.toNodeId));
+
+        draggingConnectionsRef.current = involvedConnections
+            .map((conn) => {
+                const from = allNodes.find((n) => n.id === conn.fromNodeId);
+                const to = allNodes.find((n) => n.id === conn.toNodeId);
+                if (!from || !to) return null;
+
+                const pathEls = Array.from(document.querySelectorAll<HTMLElement>(`[data-connection-id="${conn.id}"]`));
+                if (!pathEls.length) return null;
+
+                return {
+                    pathEls,
+                    fromNode: {
+                        id: from.id,
+                        initialX: from.position.x,
+                        initialY: from.position.y,
+                        width: from.width,
+                        height: from.height,
+                        isDragged: draggedIds.has(from.id),
+                    },
+                    toNode: {
+                        id: to.id,
+                        initialX: to.position.x,
+                        initialY: to.position.y,
+                        width: to.width,
+                        height: to.height,
+                        isDragged: draggedIds.has(to.id),
+                    },
+                };
+            })
+            .filter(Boolean) as typeof draggingConnectionsRef.current;
+
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         setIsNodeDragging(true);
@@ -184,6 +240,8 @@ export function useCanvasSelection({
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
+        draggingElementsRef.current = [];
+        draggingConnectionsRef.current = [];
 
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
@@ -202,20 +260,36 @@ export function useCanvasSelection({
                 const { k } = viewportRef.current;
                 const dx = (event.clientX - dragRef.current.startX) / k;
                 const dy = (event.clientY - dragRef.current.startY) / k;
-                const initialPositions = dragRef.current.initialSelectedNodes;
+
                 if (Math.abs(event.clientX - dragRef.current.startX) > 3 || Math.abs(event.clientY - dragRef.current.startY) > 3) {
                     dragRef.current.hasMoved = true;
                 }
-                if (rafRef.current) cancelAnimationFrame(rafRef.current);
-                rafRef.current = requestAnimationFrame(() => {
-                    setNodes((prev) =>
-                        prev.map((node) => {
-                            const initial = initialPositions.find((item) => item.id === node.id);
-                            return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
-                        }),
+
+                // Direct DOM manipulation - bypass React entirely during drag
+                for (const { el, initialX, initialY } of draggingElementsRef.current) {
+                    el.style.transform = `translate(${initialX + dx}px, ${initialY + dy}px)`;
+                }
+
+                // Update connection paths directly during drag
+                for (const { pathEls, fromNode, toNode } of draggingConnectionsRef.current) {
+                    const fromPos = {
+                        x: fromNode.initialX + (fromNode.isDragged ? dx : 0),
+                        y: fromNode.initialY + (fromNode.isDragged ? dy : 0),
+                    };
+                    const toPos = {
+                        x: toNode.initialX + (toNode.isDragged ? dx : 0),
+                        y: toNode.initialY + (toNode.isDragged ? dy : 0),
+                    };
+
+                    const d = computeConnectionPathD(
+                        { position: fromPos, width: fromNode.width, height: fromNode.height },
+                        { position: toPos, width: toNode.width, height: toNode.height },
                     );
-                    rafRef.current = null;
-                });
+
+                    for (const el of pathEls) {
+                        el.setAttribute("d", d);
+                    }
+                }
                 return;
             }
 
