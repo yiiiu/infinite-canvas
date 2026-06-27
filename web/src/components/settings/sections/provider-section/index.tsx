@@ -23,6 +23,7 @@ export function ProviderSettingsSection() {
     const removeProfile = useProviderConfigStore((state) => state.removeProfile);
     const [selectedProfileId, setSelectedProfileId] = useState("");
     const [creating, setCreating] = useState(false);
+    const [creatingProviderId, setCreatingProviderId] = useState<string | undefined>(undefined);
     const profiles = useMemo(() => Object.values(profilesMap), [profilesMap]);
     const providerOptions = useMemo<ProviderOption[]>(
         () =>
@@ -39,9 +40,10 @@ export function ProviderSettingsSection() {
     const formCreating = creating || !activeProfile;
     const activeKey = formCreating ? "new" : activeProfile.id;
 
-    const startCreate = () => {
+    const startCreate = (providerId?: string) => {
         setCreating(true);
         setSelectedProfileId("");
+        setCreatingProviderId(providerId);
     };
 
     const saveProfile = (value: ProfileFormValue) => {
@@ -49,6 +51,7 @@ export function ProviderSettingsSection() {
             const profile = createProfile({ ...value, enabled: true, models: [] });
             setSelectedProfileId(profile.id);
             setCreating(false);
+            setCreatingProviderId(undefined);
             return;
         }
         if (!activeProfile) return;
@@ -75,7 +78,7 @@ export function ProviderSettingsSection() {
             <Alert type="info" showIcon message="Profile 只保存连接信息" description="业务默认模型请到“默认模型”section 按能力配置。" />
             <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-4">
                 <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); }} onToggle={setProfileEnabled} onDelete={deleteProfile} />
-                <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} onSave={saveProfile} onCancelCreate={creating ? () => setCreating(false) : undefined} />
+                <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} initialProviderId={creatingProviderId} onSave={saveProfile} onCancelCreate={creating ? () => { setCreating(false); setCreatingProviderId(undefined); } : undefined} />
             </div>
         </div>
     );

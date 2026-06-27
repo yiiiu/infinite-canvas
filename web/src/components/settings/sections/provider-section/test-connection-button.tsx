@@ -2,11 +2,12 @@
 
 import { Button, Tooltip } from "antd";
 import { CheckCircle2, CircleHelp, XCircle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type RefObject } from "react";
 
 import { proxyFetch } from "@/providers/core/proxy-fetch";
 import type { JsonObject } from "@/providers/core/types";
 import { defaultProviderRegistry } from "@/providers";
+import type { GrsaiBalanceRef } from "./grsai-balance";
 
 type TestStatus =
     | { type: "idle" }
@@ -16,9 +17,10 @@ type TestStatus =
 type TestConnectionButtonProps = {
     providerId: string;
     auth: Record<string, string>;
+    grsaiBalanceRef?: RefObject<GrsaiBalanceRef>;
 };
 
-export function TestConnectionButton({ providerId, auth }: TestConnectionButtonProps) {
+export function TestConnectionButton({ providerId, auth, grsaiBalanceRef }: TestConnectionButtonProps) {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<TestStatus>({ type: "idle" });
     const adapter = useMemo(() => defaultProviderRegistry.get(providerId), [providerId]);
@@ -37,7 +39,13 @@ export function TestConnectionButton({ providerId, auth }: TestConnectionButtonP
                     responseMode: adapter.manifest.responseMode,
                 },
             );
-            setStatus({ type: result.ok ? "success" : "error", message: result.message || (result.ok ? "连接可用" : "连接失败") });
+
+            // 如果是 GrsAI，调用余额查询
+            if (result.ok && grsaiBalanceRef?.current) {
+                await grsaiBalanceRef.current.fetchBalance();
+            }
+
+            setStatus({ type: result.ok ? "success" : "error", message: result.ok ? "连接成功" : (result.message || "连接失败") });
         } catch (error) {
             setStatus({ type: "error", message: error instanceof Error ? error.message : "连接测试失败" });
         } finally {

@@ -15,8 +15,36 @@ export const grsaiAdapter: ProviderAdapter = {
         return generateImage(request, context);
     },
     async testConnection(request, context) {
-        await getJson(context, request.auth, "/models", request.signal);
-        return { ok: true, message: "连接可用" };
+        const apiKey = stringParam(request.auth, "apiKey");
+        if (!apiKey) {
+            throw new ProviderError(ProviderErrorCode.InvalidRequest, "缺少 API Key");
+        }
+
+        // 使用余额查询接口测试连接（直接使用原生 fetch 绕过代理）
+        const baseUrl = (stringParam(request.auth, "baseUrl") || GRSAI_DEFAULT_BASE_URL).replace(/\/+$/, "");
+        const url = `${baseUrl}/client/openapi/getAPIKeyCredits`;
+
+        try {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ apiKey }),
+                signal: request.signal,
+            });
+
+            const body = await response.json();
+
+            if (!response.ok || body.code !== 0) {
+                throw normalizeGrsaiError(response.status, body, "GrsAI 连接测试失败");
+            }
+
+            return { ok: true, message: "连接成功" };
+        } catch (error) {
+            if (error instanceof ProviderError) throw error;
+            throw new ProviderError(ProviderErrorCode.NetworkError, error instanceof Error ? error.message : "连接测试失败");
+        }
     },
 };
 

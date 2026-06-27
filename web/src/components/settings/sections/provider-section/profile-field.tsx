@@ -9,9 +9,11 @@ type ProfileFieldProps = {
     field: AuthField;
     value: string;
     onChange: (value: string) => void;
+    providerId?: string;
+    allAuthValues?: Record<string, string>;
 };
 
-export function ProfileField({ field, value, onChange }: ProfileFieldProps) {
+export function ProfileField({ field, value, onChange, providerId, allAuthValues }: ProfileFieldProps) {
     if (field.type === "password") {
         return <Input.Password value={value} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} autoComplete="off" />;
     }

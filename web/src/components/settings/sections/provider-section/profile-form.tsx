@@ -1,11 +1,12 @@
 "use client";
 
 import { Button, Input } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { AuthField, ProviderManifest } from "@/providers/core/types";
 import type { ProviderProfile } from "@/providers/config";
+import { GrsaiBalance, type GrsaiBalanceRef } from "./grsai-balance";
 import { ProfileField } from "./profile-field";
 import { TestConnectionButton } from "./test-connection-button";
 
@@ -37,6 +38,7 @@ export function ProfileForm({ profile, profiles, providerOptions, initialProvide
     const [providerId, setProviderId] = useState(profile?.providerId || firstProviderId);
     const [name, setName] = useState(profile?.name || "");
     const [auth, setAuth] = useState<Record<string, string>>({});
+    const grsaiBalanceRef = useRef<GrsaiBalanceRef>(null);
     const provider = useMemo(() => providerOptions.find((option) => option.id === providerId) || providerOptions[0], [providerId, providerOptions]);
     const fields = provider?.manifest.auth?.fields || [];
     const creating = !profile;
@@ -107,18 +109,23 @@ export function ProfileForm({ profile, profiles, providerOptions, initialProvide
                     </label>
 
                     {fields.map((field) => (
-                        <label key={field.key} className="grid gap-1.5 text-sm">
-                            <span className="font-medium text-stone-700 dark:text-stone-200">
-                                {field.label}
-                                {field.required ? <span className="ml-1 text-red-500">*</span> : null}
-                            </span>
-                            <ProfileField field={field} value={auth[field.key] || ""} onChange={(value) => updateAuth(field, value)} />
-                        </label>
+                        <div key={field.key} className="grid gap-1.5 text-sm">
+                            <div className="flex items-center justify-between">
+                                <span className="font-medium text-stone-700 dark:text-stone-200">
+                                    {field.label}
+                                    {field.required ? <span className="ml-1 text-red-500">*</span> : null}
+                                </span>
+                                {providerId === "grsai" && field.key === "apiKey" && (
+                                    <GrsaiBalance ref={grsaiBalanceRef} apiKey={auth[field.key] || ""} baseUrl={auth.baseUrl} />
+                                )}
+                            </div>
+                            <ProfileField field={field} value={auth[field.key] || ""} onChange={(value) => updateAuth(field, value)} providerId={providerId} allAuthValues={auth} />
+                        </div>
                     ))}
                 </div>
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-stone-200 px-5 py-4 dark:border-stone-800">
-                <TestConnectionButton providerId={providerId} auth={normalizeAuth(auth, fields)} />
+                <TestConnectionButton providerId={providerId} auth={normalizeAuth(auth, fields)} grsaiBalanceRef={providerId === "grsai" ? grsaiBalanceRef : undefined} />
                 <div className="flex items-center gap-2">
                     {creating && onCancelCreate ? <Button onClick={onCancelCreate}>取消</Button> : null}
                     <Button type="primary" disabled={!canSave} onClick={save}>
