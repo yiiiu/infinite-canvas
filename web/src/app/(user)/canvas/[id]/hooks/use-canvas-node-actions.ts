@@ -3,13 +3,13 @@ import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent } fro
 import { saveAs } from "file-saver";
 import { nanoid } from "nanoid";
 
-import { requestEdit } from "@/services/api/image";
 import { defaultConfig } from "@/stores/use-config-store";
 import { getDataUrlByteSize } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
 import { useProviderConfigStore, type ProviderConfigCapability, type ProviderModelSelection } from "@/providers/config";
 import { useProviderTaskStore } from "@/providers/task-store";
+import { generateImageResult } from "./use-canvas-generation";
 import { NODE_DEFAULT_SIZE } from "../../constants";
 import type { CanvasImageAngleParams } from "../../components/canvas-node-angle-dialog";
 import type { CanvasImageCropRect } from "../../components/canvas-node-crop-dialog";
@@ -576,7 +576,8 @@ export function useCanvasNodeActions(params: Params) {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
+                const mask = { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl };
+                const image = await generateImageResult(generationConfig, prompt, [source], controller.signal, undefined, node.providerOverride, mask);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev: CanvasNodeData[]) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
@@ -629,7 +630,7 @@ export function useCanvasNodeActions(params: Params) {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, [source], undefined, { signal: controller.signal }).then((items) => items[0]);
+                const image = await generateImageResult(generationConfig, prompt, [source], controller.signal, undefined, node.providerOverride);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                 setNodes((prev: CanvasNodeData[]) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));

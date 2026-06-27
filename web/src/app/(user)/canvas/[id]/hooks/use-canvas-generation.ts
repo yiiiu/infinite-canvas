@@ -172,7 +172,15 @@ function providerIdForRequest(request: { readonly providerId?: string; readonly 
     return request.providerId || providerIdForParams(request.params);
 }
 
-async function generateImageResult(config: AiConfig, prompt: string, references: ReferenceImage[], signal: AbortSignal, task?: CanvasProviderTask, providerOverride?: ProviderModelSelection): Promise<{ dataUrl: string | Blob }> {
+export async function generateImageResult(
+    config: AiConfig,
+    prompt: string,
+    references: ReferenceImage[],
+    signal: AbortSignal,
+    task?: CanvasProviderTask,
+    providerOverride?: ProviderModelSelection,
+    mask?: ReferenceImage,
+): Promise<{ dataUrl: string | Blob }> {
     if (shouldUseProvider(config, "image")) {
         const referenceImages = references
             .map(providerReferenceImageUrl)
@@ -182,6 +190,7 @@ async function generateImageResult(config: AiConfig, prompt: string, references:
             prompt,
             count: 1,
             ...(referenceImages.length ? { referenceImages } : {}),
+            ...(mask ? { mask: { dataUrl: mask.dataUrl, prompt } } : {}),
         }, { providerOverride });
         const result = await defaultProviderClient.generate(providerIdForRequest(providerRequest), { ...providerRequest, signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
         const image = result.outputs.find((output) => output.type === "image");
@@ -189,7 +198,7 @@ async function generateImageResult(config: AiConfig, prompt: string, references:
         if (image?.url) return { dataUrl: await (await proxyFetch(image.url, { signal })).blob() };
         throw new Error("图像接口没有返回图片");
     }
-    return references.length ? requestEdit({ ...config, count: "1" }, prompt, references, undefined, { signal }).then((items) => items[0]) : requestGeneration({ ...config, count: "1" }, prompt, { signal }).then((items) => items[0]);
+    return references.length ? requestEdit({ ...config, count: "1" }, prompt, references, mask, { signal }).then((items) => items[0]) : requestGeneration({ ...config, count: "1" }, prompt, { signal }).then((items) => items[0]);
 }
 
 function providerReferenceImageUrl(image: ReferenceImage) {
