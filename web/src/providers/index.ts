@@ -2,10 +2,12 @@ import { createProviderClient } from "./core/client";
 import { createProviderRegistry } from "./core/registry";
 import { grsaiAdapter } from "./grsai/adapter";
 import { openAICompatAdapter } from "./openai-compat/adapter";
+import { volcengineAdapter } from "./volcengine/adapter";
 
 export const defaultProviderRegistry = createProviderRegistry();
 defaultProviderRegistry.register(openAICompatAdapter);
 defaultProviderRegistry.register(grsaiAdapter);
+defaultProviderRegistry.register(volcengineAdapter);
 
 export const defaultProviderClient = createProviderClient({ registry: defaultProviderRegistry });
 
@@ -23,4 +25,5 @@ if (typeof window !== "undefined") {
 
 export { grsaiAdapter, grsaiManifest } from "./grsai/adapter";
 export { openAICompatAdapter, openAICompatManifest } from "./openai-compat/adapter";
+export { volcengineAdapter, volcengineManifest } from "./volcengine/adapter";
 export type { ModelInfo, ModelListResult, ProviderAdapter, ProviderCapability, ProviderManifest } from "./core/types";

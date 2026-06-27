@@ -1,0 +1,80 @@
+{
+  "id": "volcengine",
+  "name": "火山方舟 (Volcengine)",
+  "version": "0.1.0",
+  "description": "火山方舟视频生成 Provider，支持 Seedance 视频生成。",
+  "responseMode": "async",
+  "capabilities": ["video"],
+  "auth": {
+    "fields": [
+      { "key": "baseUrl", "type": "text", "label": "Base URL", "placeholder": "https://your-endpoint.volces.com", "required": true },
+      { "key": "apiKey", "type": "password", "label": "API Key", "placeholder": "volcengine api key", "required": true }
+    ]
+  },
+  "allowsCustomModels": false,
+  "models": [
+    {
+      "id": "vquality",
+      "name": "vquality",
+      "capabilities": ["video"],
+      "supportsReferenceImages": true,
+      "supportsReferenceVideos": true,
+      "supportsReferenceAudios": true
+    },
+    {
+      "id": "gpt-img2video-2",
+      "name": "gpt-img2video-2",
+      "capabilities": ["video"],
+      "supportsReferenceImages": true,
+      "supportsReferenceVideos": false,
+      "supportsReferenceAudios": false
+    }
+  ],
+  "parameterSchemas": {
+    "video": {
+      "type": "object",
+      "properties": {
+        "baseUrl": { "type": "string" },
+        "apiKey": { "type": "string" },
+        "model": { "type": "string" },
+        "prompt": { "type": "string" },
+        "ratio": { "type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"] },
+        "resolution": { "type": "string", "enum": ["480p", "720p", "1080p"] },
+        "videoSeconds": { "type": "number", "minimum": 2, "maximum": 10 },
+        "generate_audio": { "type": "boolean" },
+        "watermark": { "type": "boolean" },
+        "referenceImages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" }
+            },
+            "required": ["url"]
+          }
+        },
+        "referenceVideos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" }
+            },
+            "required": ["url"]
+          }
+        },
+        "referenceAudios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" }
+            },
+            "required": ["url"]
+          }
+        }
+      },
+      "required": ["baseUrl", "apiKey", "prompt"]
+    }
+  }
+}
