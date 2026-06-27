@@ -4,7 +4,7 @@ import manifest from "./manifest.json";
 
 export const grsaiManifest = manifest as ProviderManifest;
 
-const GRSAI_DEFAULT_BASE_URL = "https://api.grsai.com";
+const GRSAI_DEFAULT_BASE_URL = "https://grsai.dakka.com.cn";
 
 export const grsaiAdapter: ProviderAdapter = {
     manifest: grsaiManifest,

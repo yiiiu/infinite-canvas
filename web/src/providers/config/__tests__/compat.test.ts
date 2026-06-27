@@ -229,6 +229,64 @@ test("uses manifest auth requirements for runnable profiles", () => {
     assert.equal(result.needsProviderConfiguration, undefined);
 });
 
+test("grsai profile uses its custom baseUrl instead of legacy OpenAI-compatible config", () => {
+    useProviderConfigStore.setState({
+        mode: "profiles",
+        profiles: {
+            grsai: {
+                id: "grsai",
+                name: "GRSAI",
+                providerId: "grsai",
+                auth: { apiKey: "grsai-key", baseUrl: "https://grsai.example/v1" },
+                models: ["nano-banana"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+        defaults: { image: { profileId: "grsai", modelId: "nano-banana" } },
+    });
+
+    const result = resolveProviderRequestConfig(config, config.imageModel, "image");
+
+    assert.equal(result.profileId, "grsai");
+    assert.equal(result.providerId, "grsai");
+    assert.equal(result.baseUrl, "https://grsai.example/v1");
+    assert.equal(result.apiKey, "grsai-key");
+    assert.equal(result.model, "nano-banana");
+});
+
+test("grsai profile without baseUrl does not inherit legacy OpenAI-compatible baseUrl", () => {
+    const openAiLegacyConfig: AiConfig = {
+        ...config,
+        baseUrl: "https://api.openai.com/v1",
+        channels: [{ id: "default", name: "默认渠道", baseUrl: "https://api.openai.com/v1", apiKey: "legacy-openai-key", apiFormat: "openai", models: ["legacy-image"] }],
+    };
+
+    useProviderConfigStore.setState({
+        mode: "profiles",
+        profiles: {
+            grsai: {
+                id: "grsai",
+                name: "GRSAI",
+                providerId: "grsai",
+                auth: { apiKey: "grsai-key" },
+                models: ["nano-banana"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+        defaults: { image: { profileId: "grsai", modelId: "nano-banana" } },
+    });
+
+    const result = resolveProviderRequestConfig(openAiLegacyConfig, openAiLegacyConfig.imageModel, "image");
+
+    assert.equal(result.profileId, "grsai");
+    assert.equal(result.providerId, "grsai");
+    assert.equal(result.baseUrl, "");
+    assert.equal(result.apiKey, "grsai-key");
+    assert.equal(result.model, "nano-banana");
+});
+
 test("provider request uses node override profile and model over global default", () => {
     useProviderConfigStore.setState({
         mode: "legacy",

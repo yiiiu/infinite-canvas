@@ -17,7 +17,7 @@ type BalanceState = {
     error?: string;
 };
 
-const GRSAI_DEFAULT_BASE_URL = "https://api.grsai.com";
+const GRSAI_DEFAULT_BASE_URL = "https://grsai.dakka.com.cn";
 
 export type GrsaiBalanceRef = {
     fetchBalance: () => Promise<number | null>;

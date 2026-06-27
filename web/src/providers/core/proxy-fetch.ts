@@ -15,9 +15,15 @@ export function createProxyFetch(baseFetch: ProviderFetch = fetch): ProviderFetc
 export const proxyFetch: ProviderFetch = createProxyFetch();
 
 function resolveFetchUrl(url: string | URL) {
-    if (!isBrowserRuntime()) return stringifyUrl(url);
-
     const rawUrl = stringifyUrl(url);
+
+    // 在服务器端，直接返回原始 URL（会失败，但至少不会卡住）
+    // 实际上，所有 provider 请求都应该在客户端执行
+    if (!isBrowserRuntime()) {
+        console.warn('[proxyFetch] Attempting to fetch from server-side, this may fail:', rawUrl);
+        return rawUrl;
+    }
+
     let target: URL;
     try {
         target = new URL(rawUrl, window.location.href);

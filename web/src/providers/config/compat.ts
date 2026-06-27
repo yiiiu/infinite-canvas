@@ -50,13 +50,15 @@ export function resolveProviderRequestConfig(config: AiConfig, value: string, ca
     }
 
     const auth = profileAuth(routing.profile);
+    const profileBaseUrl = stringValue(auth.baseUrl) || routing.profile.baseUrl || "";
+    const profileApiKey = stringValue(auth.apiKey) || routing.profile.apiKey || "";
     return {
         ...legacyConfig,
         ...auth,
         profileId: routing.profile.id,
         providerId: routing.profile.providerId,
-        baseUrl: stringValue(auth.baseUrl) || routing.profile.baseUrl || legacyConfig.baseUrl,
-        apiKey: stringValue(auth.apiKey) || routing.profile.apiKey || legacyConfig.apiKey,
+        baseUrl: profileBaseUrl,
+        apiKey: profileApiKey,
         apiFormat: routing.profile.apiFormat || legacyConfig.apiFormat,
         model: routing.selection.modelId,
     };
