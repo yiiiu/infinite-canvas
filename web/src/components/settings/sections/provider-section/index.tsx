@@ -75,7 +75,7 @@ export function ProviderSettingsSection() {
                     <div className="mt-1 text-sm text-stone-500 dark:text-stone-400">管理 Provider Profile，并在“默认模型”中按能力配置默认模型。</div>
                 </div>
             </div>
-            <Alert type="info" showIcon message="Profile 只保存连接信息" description="业务默认模型请到“默认模型”section 按能力配置。" />
+            <Alert type="info" showIcon message="Profile 只保存连接信息" description="配置档仅保存 API Key、Base URL 等连接信息。模型选择在画布节点上进行。" />
             <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-4">
                 <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); }} onToggle={setProfileEnabled} onDelete={deleteProfile} />
                 <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} initialProviderId={creatingProviderId} onSave={saveProfile} onCancelCreate={creating ? () => { setCreating(false); setCreatingProviderId(undefined); } : undefined} />
