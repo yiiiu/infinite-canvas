@@ -19,7 +19,8 @@ type InfiniteCanvasProps = {
 };
 
 export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasDeselect, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
     const transformDivRef = useRef<HTMLDivElement>(null);
     const gridDivRef = useRef<HTMLDivElement>(null);
     const panState = useRef({
@@ -34,6 +35,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
+    const [isPanning, setIsPanning] = useState(false);
 
     useEffect(() => {
         scaleRef.current = viewport.k;
@@ -49,7 +51,9 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.code !== "Space") return;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+            const target = event.target instanceof Element ? event.target : null;
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || target?.closest("[contenteditable='true'],[data-canvas-no-zoom]")) return;
+            event.preventDefault();
             setIsSpacePressed(true);
         };
 
@@ -100,8 +104,9 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             return;
         }
 
-        if (event.button === 1 || (event.button === 0 && !isSpacePressed && isBackgroundClick)) {
+        if (event.button === 1 || (event.button === 0 && isSpacePressed)) {
             event.preventDefault();
+            event.stopPropagation();
             event.currentTarget.setPointerCapture(event.pointerId);
             panState.current = {
                 isPanning: true,
@@ -111,7 +116,13 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 initialY: viewport.y,
                 hasMoved: false,
             };
-            document.body.style.cursor = "grabbing";
+            setIsPanning(true);
+            document.body.style.cursor = canvasMoveCursor(colorTheme);
+            return;
+        }
+
+        if (event.button === 0 && !isSpacePressed && isBackgroundClick) {
+            onCanvasDeselect?.();
             return;
         }
 
@@ -173,7 +184,8 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
                 onCanvasDeselect?.();
             }
             panState.current.isPanning = false;
-            document.body.style.cursor = "default";
+            setIsPanning(false);
+            document.body.style.cursor = "";
         };
 
         window.addEventListener("pointermove", handlePointerMove);
@@ -196,11 +208,14 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
     return (
         <div
             ref={containerRef}
-            className="relative h-full w-full cursor-grab select-none overflow-hidden"
-            style={{ background: theme.canvas.background }}
+            className="relative h-full w-full select-none overflow-hidden"
+            style={{ background: theme.canvas.background, cursor: isPanning || isSpacePressed ? canvasMoveCursor(colorTheme) : canvasPointerCursor(colorTheme) }}
             onPointerDown={handlePointerDown}
             onWheel={handleWheel}
             onContextMenu={onContextMenu}
+            onAuxClick={(event) => {
+                if (event.button === 1) event.preventDefault();
+            }}
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}
         >
@@ -216,6 +231,14 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             </div>
         </div>
     );
+}
+
+function canvasPointerCursor(theme: "light" | "dark") {
+    return `url('/cursors/windows11-concept-v2/${theme}/pointer.cur'), auto`;
+}
+
+function canvasMoveCursor(theme: "light" | "dark") {
+    return `url('/cursors/windows11-concept-v2/${theme}/move.cur'), move`;
 }
 
 function CanvasGrid({ viewport, mode, gridDivRef }: { viewport: ViewportTransform; mode: CanvasBackgroundMode; gridDivRef: React.RefObject<HTMLDivElement> }) {

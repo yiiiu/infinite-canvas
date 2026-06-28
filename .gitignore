@@ -12,4 +12,5 @@ data/
 memory/
 codegraph/
 docs/dev/*.md
+docs/images/
 changes/

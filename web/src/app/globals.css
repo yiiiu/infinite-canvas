@@ -435,6 +435,96 @@
         top: 21px;
     }
 
+    .canvas-node-connection-target {
+        will-change: transform, box-shadow;
+    }
+
+    .canvas-node-connection-acrylic {
+        z-index: 18;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.08);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+        backdrop-filter: blur(2px) saturate(1.08);
+    }
+
+    .canvas-node-connection-acrylic::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        border: 1px solid rgba(255, 255, 255, 0.32);
+    }
+
+    .canvas-node-connection-acrylic > span {
+        position: absolute;
+        display: block;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.96), transparent);
+        filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.78));
+    }
+
+    .canvas-node-connection-acrylic > span[data-edge="top"],
+    .canvas-node-connection-acrylic > span[data-edge="bottom"] {
+        left: 18px;
+        right: 18px;
+        height: 2px;
+    }
+
+    .canvas-node-connection-acrylic > span[data-edge="right"],
+    .canvas-node-connection-acrylic > span[data-edge="left"] {
+        top: 18px;
+        bottom: 18px;
+        width: 2px;
+        background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.96), transparent);
+    }
+
+    .canvas-node-connection-acrylic > span[data-edge="top"] {
+        top: 0;
+        transform: translateX(-110%);
+        animation: canvas-connection-edge-x 1.6s linear infinite;
+    }
+
+    .canvas-node-connection-acrylic > span[data-edge="right"] {
+        right: 0;
+        transform: translateY(-110%);
+        animation: canvas-connection-edge-y 1.6s linear infinite 0.4s;
+    }
+
+    .canvas-node-connection-acrylic > span[data-edge="bottom"] {
+        bottom: 0;
+        transform: translateX(110%);
+        animation: canvas-connection-edge-x-reverse 1.6s linear infinite 0.8s;
+    }
+
+    .canvas-node-connection-acrylic > span[data-edge="left"] {
+        left: 0;
+        transform: translateY(110%);
+        animation: canvas-connection-edge-y-reverse 1.6s linear infinite 1.2s;
+    }
+
+    @keyframes canvas-connection-edge-x {
+        to {
+            transform: translateX(110%);
+        }
+    }
+
+    @keyframes canvas-connection-edge-y {
+        to {
+            transform: translateY(110%);
+        }
+    }
+
+    @keyframes canvas-connection-edge-x-reverse {
+        to {
+            transform: translateX(-110%);
+        }
+    }
+
+    @keyframes canvas-connection-edge-y-reverse {
+        to {
+            transform: translateY(-110%);
+        }
+    }
+
     @keyframes canvas-batch-child-in {
         from {
             opacity: 0;

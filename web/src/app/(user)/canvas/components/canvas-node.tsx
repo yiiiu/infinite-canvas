@@ -23,6 +23,7 @@ type CanvasNodeProps = {
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
+    connectionTargetPoint?: Position;
     isConnecting: boolean;
     editRequestNonce?: number;
     showPanel: boolean;
@@ -79,6 +80,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     isRelated,
     isFocusRelated,
     isConnectionTarget,
+    connectionTargetPoint,
     isConnecting,
     editRequestNonce = 0,
     showPanel,
@@ -107,7 +109,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
     const providerProfiles = useProviderConfigStore((state) => state.profiles);
     const providerIssue = data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video ? providerOverrideIssue(data.providerOverride, providerProfiles) : null;
     const [hovered, setHovered] = useState(false);
@@ -118,8 +121,10 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const referencePickSelected = referencePickLabel === "取消参考";
+    const hasConnectionTargetMask = isConnectionTarget && isConnecting && Boolean(connectionTargetPoint);
+    const connectionTargetTilt = hasConnectionTargetMask ? computeConnectionTargetTilt(data, connectionTargetPoint) : null;
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
-    const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
+    const imageBorderColor = isActive && !hasConnectionTargetMask ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const resizeRef = useRef({
         isResizing: false,
@@ -213,6 +218,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
     const handleResizeUp = useCallback(() => {
         resizeRef.current.isResizing = false;
+        document.body.style.cursor = "";
         window.removeEventListener("mousemove", handleResizeMove);
         window.removeEventListener("mouseup", handleResizeUp);
     }, [handleResizeMove]);
@@ -234,10 +240,12 @@ export const CanvasNode = React.memo(function CanvasNode({
         };
         window.addEventListener("mousemove", handleResizeMove);
         window.addEventListener("mouseup", handleResizeUp);
+        document.body.style.cursor = canvasResizeCursor(colorTheme, corner);
     };
 
     useEffect(() => {
         return () => {
+            document.body.style.cursor = "";
             window.removeEventListener("mousemove", handleResizeMove);
             window.removeEventListener("mouseup", handleResizeUp);
         };
@@ -253,6 +261,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 height: data.height,
                 transition: "box-shadow 200ms ease",
                 contain: "layout style",
+                perspective: hasConnectionTargetMask ? 1200 : undefined,
             }}
             onMouseEnter={() => {
                 setHovered(true);
@@ -265,11 +274,19 @@ export const CanvasNode = React.memo(function CanvasNode({
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
             <div
-                className="relative h-full w-full overflow-visible rounded-3xl border-2"
+                className={`relative h-full w-full overflow-visible rounded-3xl border-2 ${hasConnectionTargetMask ? "canvas-node-connection-target" : ""}`}
                 style={{
                     background: hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
-                    borderColor: hasImageContent ? imageBorderColor : isActive ? selectionBlue : isRelated ? theme.node.muted : theme.node.stroke,
-                    boxShadow: isActive ? `0 0 0 1px ${selectionBlue}55` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
+                    borderColor: hasImageContent ? imageBorderColor : isActive && !hasConnectionTargetMask ? selectionBlue : isRelated ? theme.node.muted : theme.node.stroke,
+                    boxShadow:
+                        isActive && !hasConnectionTargetMask
+                          ? `0 0 0 1px ${selectionBlue}55`
+                          : isRelated && !isBatchChild
+                            ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)`
+                            : undefined,
+                    transform: connectionTargetTilt ? `rotateX(${connectionTargetTilt.rotateX}deg) rotateY(${connectionTargetTilt.rotateY}deg) translateZ(0)` : undefined,
+                    transition: "transform 120ms ease, box-shadow 160ms ease, border-color 160ms ease",
+                    transformStyle: hasConnectionTargetMask ? "preserve-3d" : undefined,
                 }}
                 onMouseDown={(event) => onMouseDown(event, data.id)}
                 onDoubleClick={(event) => {
@@ -321,6 +338,15 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                     />
                 </div>
+
+                {connectionTargetTilt ? (
+                    <div className="canvas-node-connection-acrylic pointer-events-none absolute inset-0 rounded-[inherit]">
+                        <span data-edge="top" />
+                        <span data-edge="right" />
+                        <span data-edge="bottom" />
+                        <span data-edge="left" />
+                    </div>
+                ) : null}
 
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {referencePickLabel ? <ReferencePickBadge label={referencePickLabel} selected={referencePickSelected} hovered={hovered} /> : null}
@@ -698,13 +724,35 @@ function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, 
 }
 function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDown: (event: React.MouseEvent, corner: ResizeCorner) => void }) {
     const positionClass = {
-        "top-left": "-left-[14px] -top-[14px] cursor-nwse-resize",
-        "top-right": "-right-[14px] -top-[14px] cursor-nesw-resize",
-        "bottom-left": "-bottom-[14px] -left-[14px] cursor-nesw-resize",
-        "bottom-right": "-bottom-[14px] -right-[14px] cursor-nwse-resize",
+        "top-left": "-left-[14px] -top-[14px]",
+        "top-right": "-right-[14px] -top-[14px]",
+        "bottom-left": "-bottom-[14px] -left-[14px]",
+        "bottom-right": "-bottom-[14px] -right-[14px]",
     }[corner];
+    const colorTheme = useThemeStore((state) => state.theme);
 
-    return <div className={`absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
+    return <div className={`absolute z-50 size-7 ${positionClass}`} style={{ cursor: canvasResizeCursor(colorTheme, corner) }} onMouseDown={(event) => onMouseDown(event, corner)} />;
+}
+
+function canvasResizeCursor(theme: "light" | "dark", corner: ResizeCorner) {
+    const direction = corner === "top-left" || corner === "bottom-right" ? "dgn1" : "dgn2";
+    const fallback = direction === "dgn1" ? "nwse-resize" : "nesw-resize";
+    return `url('/cursors/windows11-concept-v2/${theme}/${direction}.cur'), ${fallback}`;
+}
+
+function computeConnectionTargetTilt(node: CanvasNodeData, point?: Position) {
+    const width = Math.max(node.width, 1);
+    const height = Math.max(node.height, 1);
+    const localX = point ? Math.max(0, Math.min(width, point.x - node.position.x)) : width / 2;
+    const localY = point ? Math.max(0, Math.min(height, point.y - node.position.y)) : height / 2;
+    const normalizedX = localX / width - 0.5;
+    const normalizedY = localY / height - 0.5;
+    const rotateLimit = 20;
+
+    return {
+        rotateX: -normalizedY * rotateLimit,
+        rotateY: normalizedX * rotateLimit,
+    };
 }
 
 function ConnectionHandleDot({ side, visible, disabled, onMouseDown }: { side: "left" | "right"; visible: boolean; disabled: boolean; onMouseDown: (event: React.MouseEvent) => void }) {

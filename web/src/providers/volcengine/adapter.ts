@@ -59,7 +59,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 async function resolveAssetUrl(asset: ReferenceAsset, ctx: AdapterContext, errorLabel: string): Promise<string> {
     if (asset.url) {
-        if (isPublicUrl(asset.url) || asset.url.startsWith("asset://")) return asset.url;
+        if (isPublicUrl(asset.url) || asset.url.startsWith("asset://") || asset.url.startsWith("data:image/")) return asset.url;
         if (asset.url.startsWith("blob:")) {
             const blob = await ctx.fetch(asset.url).then((r) => r.blob());
             return blobToDataUrl(blob);

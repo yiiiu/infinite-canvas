@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowUp, Square, Tag, X } from "lucide-react";
+import { ArrowUp, Plus, Square, Tag, X } from "lucide-react";
 import { Button, Tooltip } from "antd";
 
 import { NodeModelSelector } from "@/components/canvas/node-model-selector";
@@ -18,7 +18,7 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasVideoAdvancedSettingsPopover, CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
-import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
+import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasVideoTaskType } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
@@ -41,7 +41,8 @@ type CanvasNodePromptPanelProps = {
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onProviderOverrideChange, onGenerate, onStop, mentionReferences = [], referencePicking = false, onStartReferencePick, onRemoveReference, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
     const mode = defaultMode(node.type);
     const providerProfilesById = useProviderConfigStore((state) => state.profiles);
     const providerProfiles = useMemo(() => Object.values(providerProfilesById), [providerProfilesById]);
@@ -49,16 +50,29 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const config = buildNodeConfig(globalConfig, node, mode);
     const showVideoAdvancedSettings = mode === "video" && isSeedanceVideoConfig(config);
     const imageCount = clampCanvasImageCount(config.count);
+    const savedVideoTaskType = normalizeVideoTaskType(node.metadata?.videoTaskType);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
     const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? imageCount : 1 });
     const imageReferences = useMemo(() => mentionReferences.filter((reference) => reference.kind === "image" && reference.previewUrl), [mentionReferences]);
+    const hasVideoImageReference = mode === "video" && mentionReferences.some((reference) => reference.kind === "image");
+    const videoTaskType = savedVideoTaskType === "i2v" && !hasVideoImageReference ? "t2v" : savedVideoTaskType === "t2v" && hasVideoImageReference ? "i2v" : savedVideoTaskType;
+    const isFirstLastFrameVideo = videoTaskType === "first-last-frame";
+    const videoReferences = useMemo(() => (isFirstLastFrameVideo ? mentionReferences.filter((reference) => reference.kind === "image") : mentionReferences), [isFirstLastFrameVideo, mentionReferences]);
 
     useEffect(() => {
         setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
     }, [isEditingExistingContent, node.id]);
+
+    useEffect(() => {
+        if (hasVideoImageReference && savedVideoTaskType === "t2v") {
+            onConfigChange(node.id, { videoTaskType: "i2v" });
+        } else if (!hasVideoImageReference && savedVideoTaskType === "i2v") {
+            onConfigChange(node.id, { videoTaskType: "t2v" });
+        }
+    }, [hasVideoImageReference, node.id, onConfigChange, savedVideoTaskType]);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
@@ -145,6 +159,23 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
+            {mode === "video" ? (
+                <div className="mb-3 space-y-2">
+                    <VideoTaskTypeTabs value={videoTaskType} theme={theme} colorTheme={colorTheme} onChange={(value) => onConfigChange(node.id, { videoTaskType: value })} />
+                    <ImageReferenceStrip
+                        references={videoReferences}
+                        active={referencePicking}
+                        theme={theme}
+                        colorTheme={colorTheme}
+                        onAdd={() => onStartReferencePick?.(node.id)}
+                        onRemove={(referenceNodeId) => onRemoveReference?.(node.id, referenceNodeId)}
+                        maxItems={isFirstLastFrameVideo ? 2 : undefined}
+                        itemLabels={isFirstLastFrameVideo ? ["首帧", "尾帧"] : undefined}
+                        showReferenceLabel={false}
+                        showAddIcon
+                    />
+                </div>
+            ) : null}
             <CanvasResourceMentionTextarea
                 value={prompt}
                 references={mentionReferences}
@@ -213,42 +244,122 @@ function ImagePanelAction({ icon, title, theme }: { icon: ReactNode; title: stri
     );
 }
 
-function ImageReferenceStrip({ references, active, theme, onAdd, onRemove }: { references: CanvasResourceReference[]; active: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onAdd: () => void; onRemove: (referenceNodeId: string) => void }) {
+const videoTaskTypeOptions: Array<{ value: CanvasVideoTaskType; label: string }> = [
+    { value: "t2v", label: "文生视频" },
+    { value: "i2v", label: "图生视频" },
+    { value: "first-last-frame", label: "首尾帧" },
+];
+
+function VideoTaskTypeTabs({ value, theme, colorTheme, onChange }: { value: CanvasVideoTaskType; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; colorTheme: "light" | "dark"; onChange: (value: CanvasVideoTaskType) => void }) {
+    return (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {videoTaskTypeOptions.map((item) => {
+                const active = value === item.value;
+                return (
+                    <button
+                        key={item.value}
+                        type="button"
+                        className="h-9 rounded-full border px-3 text-sm transition hover:opacity-85"
+                        style={{
+                            borderColor: active ? theme.node.activeStroke : theme.node.stroke,
+                            background: active ? theme.toolbar.activeBg : "transparent",
+                            color: active ? theme.node.text : theme.node.muted,
+                            cursor: canvasPointerCursor(colorTheme),
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={() => onChange(item.value)}
+                    >
+                        {item.label}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+function ImageReferenceStrip({
+    references,
+    active,
+    theme,
+    colorTheme,
+    onAdd,
+    onRemove,
+    maxItems,
+    itemLabels,
+    showReferenceLabel = true,
+    showAddIcon = false,
+}: {
+    references: CanvasResourceReference[];
+    active: boolean;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    colorTheme?: "light" | "dark";
+    onAdd: () => void;
+    onRemove: (referenceNodeId: string) => void;
+    maxItems?: number;
+    itemLabels?: string[];
+    showReferenceLabel?: boolean;
+    showAddIcon?: boolean;
+}) {
+    const canAdd = maxItems === undefined || references.length < maxItems;
     return (
         <div className="thin-scrollbar flex min-w-0 items-center gap-2 overflow-x-auto">
             <button
                 type="button"
-                className="flex h-14 min-w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-3 text-xs transition hover:opacity-80"
-                style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: active ? theme.node.text : theme.node.muted, background: active ? theme.toolbar.activeBg : "transparent" }}
-                onClick={onAdd}
+                className="flex h-14 min-w-16 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-3 text-xs transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
+                style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: active ? theme.node.text : theme.node.muted, background: active ? theme.toolbar.activeBg : "transparent", cursor: canAdd && colorTheme ? canvasPointerCursor(colorTheme) : undefined }}
+                disabled={!canAdd}
+                onClick={() => {
+                    if (canAdd) onAdd();
+                }}
             >
+                {showAddIcon ? <Plus className="size-4" /> : null}
                 <span>参考</span>
             </button>
-            {references.map((reference) => (
-                <div key={reference.id} className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }} title={reference.title}>
-                    <img src={reference.previewUrl} alt={reference.title} className="size-full object-cover" />
-                    <span className="absolute bottom-1 left-1 max-w-[46px] truncate rounded-md px-1 py-0.5 text-[10px] font-medium text-white shadow" style={{ background: "rgba(0,0,0,.48)" }}>
-                        {reference.label}
-                    </span>
-                    <button
-                        type="button"
-                        className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-black/55 text-white opacity-0 shadow-sm transition group-hover:opacity-100"
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            onRemove(reference.nodeId);
-                        }}
-                        aria-label="移除参考图"
-                    >
-                        <X className="size-3" />
-                    </button>
-                </div>
-            ))}
+            {references.map((reference, index) => {
+                const cornerLabel = itemLabels?.[index];
+                return (
+                    <div key={reference.id} className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }} title={reference.title}>
+                        {reference.kind === "image" && reference.previewUrl ? (
+                            <img src={reference.previewUrl} alt={reference.title} className="size-full object-cover" />
+                        ) : (
+                            <div className="grid size-full place-items-center px-1 text-center text-[11px] font-medium" style={{ background: theme.node.fill, color: theme.node.muted }}>
+                                {reference.kind === "audio" ? "音频" : reference.kind === "text" ? "文本" : reference.kind === "video" ? "视频" : "参考"}
+                            </div>
+                        )}
+                        {cornerLabel ? (
+                            <span className="absolute right-1 top-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm transition group-hover:opacity-0" style={{ background: "rgba(0,0,0,.55)" }}>
+                                {cornerLabel}
+                            </span>
+                        ) : null}
+                        {showReferenceLabel ? (
+                            <span className="absolute bottom-1 left-1 max-w-[46px] truncate rounded-md px-1 py-0.5 text-[10px] font-medium text-white shadow" style={{ background: "rgba(0,0,0,.48)" }}>
+                                {reference.label}
+                            </span>
+                        ) : null}
+                        <button
+                            type="button"
+                            className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-black/55 text-white opacity-0 shadow-sm transition group-hover:opacity-100"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onRemove(reference.nodeId);
+                            }}
+                            aria-label="移除参考图"
+                        >
+                            <X className="size-3" />
+                        </button>
+                    </div>
+                );
+            })}
         </div>
     );
 }
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
+}
+
+function normalizeVideoTaskType(value: unknown): CanvasVideoTaskType {
+    return value === "i2v" || value === "first-last-frame" ? value : "t2v";
 }
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
@@ -291,4 +402,8 @@ function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };
     return { audioInstructions: value };
+}
+
+function canvasPointerCursor(theme: "light" | "dark") {
+    return `url('/cursors/windows11-concept-v2/${theme}/pointer.cur'), pointer`;
 }

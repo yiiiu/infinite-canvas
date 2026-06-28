@@ -20,6 +20,7 @@ export enum CanvasNodeType {
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasVideoTaskType = "t2v" | "i2v" | "first-last-frame";
 
 export type CanvasNodeMetadata = {
     content?: string;
@@ -30,6 +31,7 @@ export type CanvasNodeMetadata = {
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
+    videoTaskType?: CanvasVideoTaskType;
     model?: string;
     size?: string;
     quality?: string;

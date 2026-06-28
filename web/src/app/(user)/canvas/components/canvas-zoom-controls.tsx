@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { Compass, Focus, HelpCircle } from "lucide-react";
 import { useState } from "react";
 import { Button, Modal, Tooltip } from "antd";
+import { Compass, Focus, HelpCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -59,12 +59,13 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
             </div>
             <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
                 <div className="space-y-3 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
-                    <Shortcut label="拖动画布" value="平移视图" />
+                    <Shortcut label="空格 + 左键拖动" value="平移画布" />
+                    <Shortcut label="鼠标中键拖动" value="平移画布" />
                     <Shortcut label="滚轮" value="缩放画布" />
                     <Shortcut label="Ctrl / Cmd + 拖动" value="框选多个节点" />
                     <Shortcut label="Shift / Ctrl / Cmd + 点击" value="追加选择节点" />
                     <Shortcut label="Ctrl / Cmd + C / V" value="复制 / 粘贴节点" />
-                    <Shortcut label="Delete / Backspace" value="删除选中" />
+                    <Shortcut label="Delete / Backspace" value="删除选中节点" />
                 </div>
             </Modal>
         </div>

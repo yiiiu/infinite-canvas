@@ -53,7 +53,7 @@ import { useCanvasSelection } from "./hooks/use-canvas-selection";
 import { useCanvasGeneration } from "./hooks/use-canvas-generation";
 import { useCanvasNodeActions } from "./hooks/use-canvas-node-actions";
 import { useCanvasAssistantActions } from "./hooks/use-canvas-assistant-actions";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ConnectionHandle, type Position, type SelectionBox, type ViewportTransform } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasVideoTaskType, type ConnectionHandle, type Position, type SelectionBox, type ViewportTransform } from "../types";
 
 type CanvasClipboard = {
     nodes: CanvasNodeData[];
@@ -460,12 +460,24 @@ function InfiniteCanvasPage() {
             if (targetNodeId === sourceNodeId) return;
             const source = nodesRef.current.find((node) => node.id === sourceNodeId);
             const target = nodesRef.current.find((node) => node.id === targetNodeId);
-            if (source?.type !== CanvasNodeType.Image || !source.metadata?.content || target?.type !== CanvasNodeType.Image) return;
+            if (!source || !target || !isReferencePickTargetNode(target) || !isReferencePickSourceNode(source, target)) return;
             const exists = connectionsRef.current.some((connection) => connection.fromNodeId === sourceNodeId && connection.toNodeId === targetNodeId);
             if (exists) return;
+            const targetVideoTaskType = normalizeCanvasVideoTaskType(target.metadata?.videoTaskType);
+            if (target.type === CanvasNodeType.Video && targetVideoTaskType === "first-last-frame") {
+                if (source.type !== CanvasNodeType.Image) return;
+                const imageReferenceCount = countImageReferenceConnections(targetNodeId, nodesRef.current, connectionsRef.current);
+                if (imageReferenceCount >= 2) {
+                    message.warning("首尾帧模式最多添加两张参考图");
+                    return;
+                }
+            }
             setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceNodeId, toNodeId: targetNodeId }]);
+            if (target.type === CanvasNodeType.Video && source.type === CanvasNodeType.Image && targetVideoTaskType !== "first-last-frame") {
+                setNodes((prev) => prev.map((node) => (node.id === targetNodeId ? { ...node, metadata: { ...node.metadata, videoTaskType: "i2v" } } : node)));
+            }
         },
-        [setConnections],
+        [message, setConnections, setNodes],
     );
 
     const removeImageReferenceConnection = useCallback(
@@ -506,6 +518,7 @@ function InfiniteCanvasPage() {
     }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+    const referencePickTargetNode = referencePickTargetNodeId ? nodeById.get(referencePickTargetNodeId) || null : null;
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -521,7 +534,7 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!referencePickTargetNodeId) return;
         const targetNode = nodesRef.current.find((node) => node.id === referencePickTargetNodeId);
-        if (!targetNode || targetNode.type !== CanvasNodeType.Image) setReferencePickTargetNodeId(null);
+        if (!targetNode || !isReferencePickTargetNode(targetNode)) setReferencePickTargetNodeId(null);
     }, [nodes, referencePickTargetNodeId]);
 
     useEffect(() => {
@@ -810,7 +823,8 @@ function InfiniteCanvasPage() {
                             isSelected={selectedNodeIds.has(node.id)}
                             isRelated={relatedHighlight.nodeIds.has(node.id)}
                             isFocusRelated={activeNodeId === node.id}
-                            isConnectionTarget={connectionTargetNodeId === node.id || (referencePickTargetNodeId !== null && hoveredNodeId === node.id && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content) && node.id !== referencePickTargetNodeId)}
+                            isConnectionTarget={connectionTargetNodeId === node.id || (referencePickTargetNode !== null && hoveredNodeId === node.id && node.id !== referencePickTargetNode.id && isReferencePickSourceNode(node, referencePickTargetNode))}
+                            connectionTargetPoint={connectionTargetNodeId === node.id ? mouseWorld : undefined}
                             isConnecting={Boolean(connectingParams)}
                             editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
                             showPanel={dialogNodeId === node.id && !selectionBox}
@@ -823,7 +837,7 @@ function InfiniteCanvasPage() {
                             showImageInfo={showImageInfo}
                             resourceLabel={resourceReferenceByNodeId.get(node.id)}
                             mentionReferences={mentionReferencesByNodeId.get(node.id) || []}
-                            referencePickLabel={referencePickTargetNodeId && node.type === CanvasNodeType.Image && Boolean(node.metadata?.content) && node.id !== referencePickTargetNodeId ? (referencePickSourceNodeIds.has(node.id) ? "取消参考" : "选择为参考") : undefined}
+                            referencePickLabel={referencePickTargetNode && node.id !== referencePickTargetNode.id && isReferencePickSourceNode(node, referencePickTargetNode) ? (referencePickSourceNodeIds.has(node.id) ? "取消参考" : "选择为参考") : undefined}
                             renderPanel={(panelNode) =>
                                 panelNode.type === CanvasNodeType.Config ? (
                                     <CanvasConfigComposer
@@ -866,8 +880,9 @@ function InfiniteCanvasPage() {
                             )}
                             onMouseDown={(event, nodeId) => {
                                 const targetNodeId = referencePickTargetNodeId;
+                                const targetNode = targetNodeId ? nodesRef.current.find((item) => item.id === targetNodeId) : null;
                                 const clickedNode = nodesRef.current.find((item) => item.id === nodeId);
-                                if (targetNodeId && clickedNode?.type === CanvasNodeType.Image && clickedNode.metadata?.content && clickedNode.id !== targetNodeId) {
+                                if (targetNodeId && targetNode && clickedNode && clickedNode.id !== targetNodeId && isReferencePickSourceNode(clickedNode, targetNode)) {
                                     event.preventDefault();
                                     event.stopPropagation();
                                     if (referencePickSourceNodeIds.has(nodeId)) {
@@ -1219,7 +1234,8 @@ function CanvasTopBar({
             </div>
             <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
                 <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
-                    <Shortcut keys={["拖动画布"]} value="平移视图" />
+                    <Shortcut keys={["空格 + 左键拖动"]} value="平移视图" />
+                    <Shortcut keys={["鼠标中键拖动"]} value="平移视图" />
                     <Shortcut keys={["滚轮"]} value="缩放画布" />
                     <Shortcut keys={["缩放滑杆"]} value="精确调整缩放" />
                     <Shortcut keys={["Ctrl / Cmd", "拖动"]} value="框选多个节点" />
@@ -1285,4 +1301,30 @@ function Shortcut({ keys, value }: { keys: string[]; value: string }) {
             <span className="text-right text-sm opacity-55">{value}</span>
         </div>
     );
+}
+
+function isReferencePickTargetNode(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video;
+}
+
+function isReferencePickSourceNode(source: CanvasNodeData, target: CanvasNodeData) {
+    if (target.type === CanvasNodeType.Image) return source.type === CanvasNodeType.Image && Boolean(source.metadata?.content);
+    if (target.type === CanvasNodeType.Video && normalizeCanvasVideoTaskType(target.metadata?.videoTaskType) === "first-last-frame") return source.type === CanvasNodeType.Image && Boolean(source.metadata?.content);
+    if (target.type === CanvasNodeType.Video) return isReferenceResourceNode(source);
+    return false;
+}
+
+function isReferenceResourceNode(node: CanvasNodeData) {
+    if (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) return Boolean(node.metadata?.content);
+    if (node.type === CanvasNodeType.Text) return Boolean(node.metadata?.content || node.metadata?.prompt);
+    return false;
+}
+
+function normalizeCanvasVideoTaskType(value: unknown): CanvasVideoTaskType {
+    return value === "i2v" || value === "first-last-frame" ? value : "t2v";
+}
+
+function countImageReferenceConnections(targetNodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return connections.filter((connection) => connection.toNodeId === targetNodeId && nodeById.get(connection.fromNodeId)?.type === CanvasNodeType.Image).length;
 }
