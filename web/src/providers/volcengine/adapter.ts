@@ -9,7 +9,7 @@ import {
 } from "../core/types";
 import { pollUntil } from "../core/polling";
 import manifest from "./manifest.json";
-import { getMediaBlob, uploadMediaFile } from "@/services/file-storage";
+import { getMediaBlob } from "@/services/file-storage";
 import {
     boolConfig,
     buildSeedancePromptText,
@@ -36,6 +36,9 @@ type ReferenceVideo = ReferenceAsset & { durationMs?: number; width?: number; he
 
 const SEEDANCE_POLL_INTERVAL = 3000;
 const SEEDANCE_POLL_TIMEOUT = 600000;
+const VOLCENGINE_BASE_URL_HINT = "火山方舟 Base URL 应以 `ark.cn-beijing.volces.com/api/v3` 或 `ark.cn-beijing.volces.com/api/plan/v3` 结尾";
+const VOLCENGINE_BASE_URL_HOST = "ark.cn-beijing.volces.com";
+const VOLCENGINE_BASE_URL_PATHS = ["/api/v3", "/api/plan/v3"] as const;
 
 function isPublicUrl(value: string) {
     return /^https?:\/\//i.test(value || "");
@@ -60,6 +63,7 @@ async function resolveAssetUrl(asset: ReferenceAsset, ctx: AdapterContext, error
     }
     if (asset.storageKey) {
         const blob = await getMediaBlob(asset.storageKey);
+        if (!blob) throw new ProviderError(ProviderErrorCode.InvalidRequest, `${errorLabel} 文件不存在`);
         return blobToDataUrl(blob);
     }
     throw new ProviderError(ProviderErrorCode.InvalidRequest, `${errorLabel} URL 无效`);
@@ -95,7 +99,7 @@ async function buildSeedanceContent(
 
 async function createSeedanceTask(request: GenerateRequest, ctx: AdapterContext): Promise<string> {
     const p = request.params;
-    const baseUrl = String(p.baseUrl || "").replace(/\/$/, "");
+    const baseUrl = normalizeVolcengineBaseUrl(p.baseUrl);
     const apiKey = String(p.apiKey || "");
     const model = String(p.model || "");
     const prompt = String(p.prompt || "");
@@ -153,7 +157,7 @@ function unwrapEnvelope(data: Record<string, unknown>, emptyMsg: string): Seedan
 }
 
 async function pollSeedanceTask(taskId: string, request: GenerateRequest, ctx: AdapterContext): Promise<SeedanceTask> {
-    const baseUrl = String(request.params.baseUrl || "").replace(/\/$/, "");
+    const baseUrl = normalizeVolcengineBaseUrl(request.params.baseUrl);
     const apiKey = String(request.params.apiKey || "");
 
     return pollUntil<SeedanceTask>({
@@ -169,11 +173,32 @@ async function pollSeedanceTask(taskId: string, request: GenerateRequest, ctx: A
         intervalMs: SEEDANCE_POLL_INTERVAL,
         timeoutMs: SEEDANCE_POLL_TIMEOUT,
         signal: request.signal,
+        onProgress: ({ attempt, elapsedMs, value }) => {
+            void ctx.updateTask?.({ runtimeTaskId: taskId, status: "running", message: value.status, metadata: { attempt, elapsedMs } });
+        },
     });
 }
 
 export const volcengineAdapter: ProviderAdapter = {
     manifest: volcengineManifest,
+
+    async testConnection(request, ctx) {
+        const baseUrl = normalizeVolcengineBaseUrl(request.auth.baseUrl);
+        const apiKey = stringParam(request.auth, "apiKey");
+        if (!apiKey) throw new ProviderError(ProviderErrorCode.InvalidRequest, "缺少 API Key");
+
+        const response = await ctx.fetch(`${baseUrl}/contents/generations/tasks?page_num=1&page_size=1`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: request.signal,
+        });
+        const payload = await readJson(response);
+        if (response.status === 401 || response.status === 403) {
+            throw new ProviderError(ProviderErrorCode.Unauthorized, errorMessage(payload) || "Volcengine 鉴权失败", { details: { status: response.status } });
+        }
+        if (response.ok) return { ok: true, message: "连接成功" };
+        if (response.status === 400 || response.status === 422) return { ok: true, message: "连接成功" };
+        throw new ProviderError(ProviderErrorCode.NetworkError, errorMessage(payload) || `Volcengine 连接测试失败：${response.status}`, { details: { status: response.status } });
+    },
 
     async generate(request: GenerateRequest, ctx: AdapterContext): Promise<GenerateResult> {
         if (request.capability !== "video") {
@@ -181,6 +206,7 @@ export const volcengineAdapter: ProviderAdapter = {
         }
 
         const taskId = await createSeedanceTask(request, ctx);
+        await ctx.updateTask?.({ runtimeTaskId: taskId, status: "running", message: "created" });
         const task = await pollSeedanceTask(taskId, request, ctx);
 
         if (task.status === "succeeded") {
@@ -188,13 +214,11 @@ export const volcengineAdapter: ProviderAdapter = {
             if (!videoUrl) throw new ProviderError(ProviderErrorCode.AdapterError, "视频生成成功但未返回视频 URL");
 
             const videoBlob = await ctx.fetch(videoUrl, { signal: request.signal }).then((r) => r.blob());
-            const uploaded = await uploadMediaFile(videoBlob, "video");
-
             return {
                 providerId: volcengineManifest.id,
                 capability: "video",
                 modelId: String(request.params.model || ""),
-                outputs: [{ type: "video", url: uploaded.url }],
+                outputs: [{ type: "video", blob: videoBlob, mimeType: videoBlob.type || "video/mp4" }],
             };
         }
 
@@ -202,3 +226,53 @@ export const volcengineAdapter: ProviderAdapter = {
         throw new ProviderError(ProviderErrorCode.AdapterError, errorMsg);
     },
 };
+
+function normalizeVolcengineBaseUrl(value: unknown) {
+    const rawBaseUrl = typeof value === "string" ? value.trim().replace(/\/+$/, "") : "";
+    const baseUrl = rawBaseUrl && !/^https?:\/\//i.test(rawBaseUrl) ? `https://${rawBaseUrl}` : rawBaseUrl;
+    if (!baseUrl) throw new ProviderError(ProviderErrorCode.InvalidRequest, "缺少 Base URL");
+    const lower = baseUrl.toLowerCase();
+    if (lower.includes("/contents/generations")) {
+        throw new ProviderError(ProviderErrorCode.InvalidRequest, "Base URL 只需填到 `/api/v3` 或 `/api/plan/v3`，不要包含具体接口路径");
+    }
+    try {
+        const url = new URL(baseUrl);
+        const path = url.pathname.replace(/\/+$/, "").toLowerCase();
+        if (url.hostname.toLowerCase() === VOLCENGINE_BASE_URL_HOST && VOLCENGINE_BASE_URL_PATHS.includes(path as (typeof VOLCENGINE_BASE_URL_PATHS)[number])) {
+            url.pathname = path;
+            url.search = "";
+            url.hash = "";
+            return url.toString().replace(/\/+$/, "");
+        }
+    } catch {
+        // Fall through to the shared hint below.
+    }
+    throw new ProviderError(ProviderErrorCode.InvalidRequest, VOLCENGINE_BASE_URL_HINT);
+}
+
+async function readJson(response: Response): Promise<unknown> {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text) as unknown;
+    } catch {
+        return text;
+    }
+}
+
+function errorMessage(payload: unknown): string | undefined {
+    if (!isRecord(payload)) return undefined;
+    if (isRecord(payload.error) && typeof payload.error.message === "string") return payload.error.message;
+    if (typeof payload.message === "string") return payload.message;
+    if (typeof payload.msg === "string") return payload.msg;
+    return undefined;
+}
+
+function stringParam(params: Record<string, unknown>, key: string) {
+    const value = params[key];
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}

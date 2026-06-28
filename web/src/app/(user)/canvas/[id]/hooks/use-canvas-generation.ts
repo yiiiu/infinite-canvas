@@ -14,6 +14,7 @@ import { normalizeProviderError } from "@/providers/core/error-normalize";
 import { proxyFetch } from "@/providers/core/proxy-fetch";
 import { isNewProviderEnabled } from "@/providers/feature-flags";
 import { aiConfigToProviderRequest } from "@/providers/openai-compat/config-bridge";
+import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -210,8 +211,8 @@ type CanvasProviderTask = {
     taskContext: ProviderTaskContext;
 };
 
-function createProviderTask(projectId: string, nodeId: string, referenceImages: ReferenceImage[] = []): CanvasProviderTask {
-    const unrecoverable = hasUnrecoverableReferenceImages(referenceImages);
+function createProviderTask(projectId: string, nodeId: string, referenceImages: ReferenceImage[] = [], referenceVideos: ReferenceVideo[] = [], referenceAudios: ReferenceAudio[] = []): CanvasProviderTask {
+    const unrecoverable = hasUnrecoverableReferences(referenceImages, referenceVideos, referenceAudios);
     return {
         pendingId: nanoid(),
         taskContext: {
@@ -222,6 +223,10 @@ function createProviderTask(projectId: string, nodeId: string, referenceImages: 
             unrecoverableReason: unrecoverable ? "参考图没有稳定 storageKey，无法跨刷新恢复" : undefined,
         },
     };
+}
+
+function hasUnrecoverableReferences(referenceImages: ReferenceImage[] = [], referenceVideos: ReferenceVideo[] = [], referenceAudios: ReferenceAudio[] = []) {
+    return hasUnrecoverableReferenceImages(referenceImages) || referenceVideos.some((video) => !video.storageKey) || referenceAudios.some((audio) => !audio.storageKey);
 }
 
 function hasUnrecoverableReferenceImages(referenceImages: ReferenceImage[]) {
@@ -237,6 +242,12 @@ function providerIdForParams(params: { readonly baseUrl?: unknown }) {
     return baseUrl.includes("grsai") ? "grsai" : "openai-compat";
 }
 
+function providerIdForVideoRequest(request: { readonly providerId?: string; readonly params: { readonly baseUrl?: unknown; readonly model?: unknown } }) {
+    const model = typeof request.params.model === "string" ? request.params.model : "";
+    const baseUrl = typeof request.params.baseUrl === "string" ? request.params.baseUrl : "";
+    return isSeedanceVideoConfig({ model, videoModel: model, baseUrl }) ? "volcengine" : providerIdForRequest(request);
+}
+
 async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal, task?: CanvasProviderTask, providerOverride?: ProviderModelSelection): Promise<UploadedFile> {
     if (shouldUseProvider(config, "audio")) {
         const providerRequest = aiConfigToProviderRequest(config, "audio", { input: prompt }, { providerOverride });
@@ -249,11 +260,69 @@ async function generateAudioResult(config: AiConfig, prompt: string, signal: Abo
     return storeGeneratedAudio(await requestAudioGeneration(config, prompt, { signal }), config.audioFormat);
 }
 
-async function generateVideoResult(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], signal: AbortSignal): Promise<UploadedFile> {
+async function generateVideoResult(
+    config: AiConfig,
+    prompt: string,
+    references: ReferenceImage[],
+    videoReferences: ReferenceVideo[],
+    audioReferences: ReferenceAudio[],
+    signal: AbortSignal,
+    task?: CanvasProviderTask,
+    providerOverride?: ProviderModelSelection,
+): Promise<UploadedFile> {
+    if (shouldUseProvider(config, "video")) {
+        const referenceImages = references
+            .map(providerReferenceImageUrl)
+            .filter((url): url is string => Boolean(url))
+            .map((url) => ({ url }));
+        const videoSeconds = finiteNumber(config.videoSeconds);
+        const providerRequest = aiConfigToProviderRequest(config, "video", {
+            prompt,
+            size: config.size,
+            ratio: config.size,
+            resolution: config.vquality,
+            vquality: config.vquality,
+            ...(videoSeconds !== undefined ? { seconds: videoSeconds, videoSeconds } : {}),
+            videoGenerateAudio: config.videoGenerateAudio,
+            videoWatermark: config.videoWatermark,
+            generate_audio: config.videoGenerateAudio,
+            watermark: config.videoWatermark,
+            ...(referenceImages.length ? { referenceImages } : {}),
+            ...(videoReferences.length ? { referenceVideos: videoReferences.map(providerReferenceVideo) } : {}),
+            ...(audioReferences.length ? { referenceAudios: audioReferences.map(providerReferenceAudio) } : {}),
+        }, { providerOverride });
+        const result = await defaultProviderClient.generate(providerIdForVideoRequest(providerRequest), { ...providerRequest, signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
+        const video = result.outputs.find((output) => output.type === "video");
+        if (video?.blob) return storeGeneratedVideo({ blob: video.blob, mimeType: video.mimeType });
+        if (video?.url) return storeGeneratedVideo({ blob: await (await proxyFetch(video.url, { signal })).blob(), mimeType: video.mimeType });
+        throw new Error("视频接口没有返回可播放的视频");
+    }
     return storeGeneratedVideo(await requestVideoGeneration(config, prompt, references, videoReferences, audioReferences, { signal }));
 }
 
-function shouldUseProvider(config: AiConfig, capability: "image" | "audio") {
+function providerReferenceVideo(video: ReferenceVideo) {
+    const item: Record<string, string | number> = { url: video.url };
+    if (video.storageKey) item.storageKey = video.storageKey;
+    if (video.durationMs) item.durationMs = video.durationMs;
+    if (video.width) item.width = video.width;
+    if (video.height) item.height = video.height;
+    if (video.bytes) item.bytes = video.bytes;
+    return item;
+}
+
+function providerReferenceAudio(audio: ReferenceAudio) {
+    const item: Record<string, string | number> = { url: audio.url };
+    if (audio.storageKey) item.storageKey = audio.storageKey;
+    if (audio.durationMs) item.durationMs = audio.durationMs;
+    return item;
+}
+
+function finiteNumber(value: string) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : undefined;
+}
+
+function shouldUseProvider(config: AiConfig, capability: "image" | "audio" | "video") {
     return config.apiFormat === "openai" && isNewProviderEnabled(capability);
 }
 
@@ -347,8 +416,13 @@ export function useCanvasGeneration({
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             const imageProviderOverride = mode === "image" ? (sourceNode?.type === CanvasNodeType.Image ? sourceNode.providerOverride || providerOverrideForCapability("image") : providerOverrideForCapability("image")) : undefined;
-            const usesImageProviderRouting = mode === "image" && shouldUseProvider(generationConfig, "image") && Boolean(imageProviderOverride);
-            if (!usesImageProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
+            const videoProviderOverride = mode === "video" ? (sourceNode?.type === CanvasNodeType.Video ? sourceNode.providerOverride || providerOverrideForCapability("video") : providerOverrideForCapability("video")) : undefined;
+            const audioProviderOverride = mode === "audio" ? (sourceNode?.type === CanvasNodeType.Audio ? sourceNode.providerOverride || providerOverrideForCapability("audio") : providerOverrideForCapability("audio")) : undefined;
+            const usesProviderRouting =
+                (mode === "image" && shouldUseProvider(generationConfig, "image") && Boolean(imageProviderOverride)) ||
+                (mode === "video" && shouldUseProvider(generationConfig, "video") && Boolean(videoProviderOverride)) ||
+                (mode === "audio" && shouldUseProvider(generationConfig, "audio") && Boolean(audioProviderOverride));
+            if (!usesProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -531,7 +605,6 @@ export function useCanvasGeneration({
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
-                    const videoProviderOverride = providerOverrideForCapability("video");
                     const videoNode: CanvasNodeData = {
                         id: videoId,
                         type: CanvasNodeType.Video,
@@ -545,11 +618,24 @@ export function useCanvasGeneration({
                     pendingChildIds = [videoId];
                     setNodes((prev) => (isEmptyVideoNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode]));
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
-                    const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
+                    const task = shouldUseProvider(generationConfig, "video") ? createProviderTask(projectId, videoId, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios) : undefined;
+                    if (task && hasUnrecoverableReferences(generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios)) message.warning("当前参考素材无法跨刷新恢复，刷新后需重新生成");
+                    const controller = startGenerationRequest(videoId, nodeId, nodeId, runController, task?.pendingId);
+                    if (task) {
+                        useProviderTaskStore.getState().supersedeNodeTasks(projectId, videoId, task.pendingId);
+                        setNodeTaskMetadata(setNodes, videoId, task.pendingId, TaskStatus.Pending);
+                    }
                     try {
-                        const video = await generateVideoResult(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, controller.signal);
+                        const video = await generateVideoResult(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, controller.signal, task, videoProviderOverride);
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                         setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) } } : node)));
+                        if (task) {
+                            useProviderTaskStore.getState().markWritten(task.pendingId);
+                            setNodeTaskMetadata(setNodes, videoId, task.pendingId, TaskStatus.Written);
+                        }
+                    } catch (error) {
+                        if (task) setNodeTaskMetadata(setNodes, videoId, task.pendingId, isCanvasGenerationCanceled(error) ? TaskStatus.Cancelled : TaskStatus.Failed);
+                        throw error;
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -561,7 +647,6 @@ export function useCanvasGeneration({
                     const isEmptyAudioNode = sourceNode?.type === CanvasNodeType.Audio && !sourceNode.metadata?.content;
                     const audioId = isEmptyAudioNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
-                    const audioProviderOverride = providerOverrideForCapability("audio");
                     const audioNode: CanvasNodeData = {
                         id: audioId,
                         type: CanvasNodeType.Audio,
@@ -686,6 +771,29 @@ export function useCanvasGeneration({
 
             for (const task of scan.writeBackTasks) {
                 if (cancelled) return;
+                const video = task.result?.outputs.find((output) => output.type === "video");
+                if (video?.type === "video") {
+                    try {
+                        const uploaded = video.blob ? await storeGeneratedVideo({ blob: video.blob, mimeType: video.mimeType }) : video.url ? await storeGeneratedVideo({ blob: await (await proxyFetch(video.url)).blob(), mimeType: video.mimeType }) : null;
+                        if (!uploaded) {
+                            useProviderTaskStore.getState().markUnrecoverable(task.pendingId, "任务结果缺少可恢复视频地址");
+                            continue;
+                        }
+                        if (cancelled) return;
+                        const videoSize = fitNodeSize(uploaded.width || NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, uploaded.height || NODE_DEFAULT_SIZE[CanvasNodeType.Video].height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                        setNodes((prev) =>
+                            prev.map((node) => {
+                                if (node.id !== task.nodeId) return node;
+                                const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
+                                return { ...node, position: { x: center.x - videoSize.width / 2, y: center.y - videoSize.height / 2 }, width: videoSize.width, height: videoSize.height, metadata: { ...node.metadata, ...videoMetadata(uploaded), task: { pendingId: task.pendingId, status: TaskStatus.Written } } };
+                            }),
+                        );
+                        useProviderTaskStore.getState().markWritten(task.pendingId);
+                    } catch (error) {
+                        useProviderTaskStore.getState().markUnrecoverable(task.pendingId, generationErrorMessage(error));
+                    }
+                    continue;
+                }
                 const image = task.result?.outputs.find((output) => output.type === "image");
                 if (!image || image.type !== "image") {
                     useProviderTaskStore.getState().markUnrecoverable(task.pendingId, "任务结果类型暂不支持恢复写回");
@@ -737,8 +845,9 @@ export function useCanvasGeneration({
                       }
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
             const retryImageProviderOverride = node.type === CanvasNodeType.Image ? node.providerOverride || providerOverrideForCapability("image") : undefined;
-            const usesImageProviderRouting = node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image") && Boolean(retryImageProviderOverride);
-            if (!usesImageProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
+            const retryVideoProviderOverride = node.type === CanvasNodeType.Video ? node.providerOverride || providerOverrideForCapability("video") : undefined;
+            const usesProviderRouting = ((node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image")) || (node.type === CanvasNodeType.Video && shouldUseProvider(generationConfig, "video"))) && Boolean(retryImageProviderOverride || retryVideoProviderOverride);
+            if (!usesProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -759,8 +868,12 @@ export function useCanvasGeneration({
             }
             const retryImages = retryReferenceImages || [];
 
-            const retryTask = (node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image")) || (node.type === CanvasNodeType.Audio && shouldUseProvider(generationConfig, "audio")) ? createProviderTask(projectId, node.id, node.type === CanvasNodeType.Image ? retryImages : []) : undefined;
+            const retryTask =
+                (node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image")) || (node.type === CanvasNodeType.Audio && shouldUseProvider(generationConfig, "audio")) || (node.type === CanvasNodeType.Video && shouldUseProvider(generationConfig, "video"))
+                    ? createProviderTask(projectId, node.id, node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video ? retryImages : [], node.type === CanvasNodeType.Video ? context?.referenceVideos || [] : [], node.type === CanvasNodeType.Video ? context?.referenceAudios || [] : [])
+                    : undefined;
             if (retryTask && node.type === CanvasNodeType.Image && hasUnrecoverableReferenceImages(retryImages)) message.warning("当前参考图无法跨刷新恢复，刷新后需重新生成");
+            if (retryTask && node.type === CanvasNodeType.Video && hasUnrecoverableReferences(retryImages, context?.referenceVideos || [], context?.referenceAudios || [])) message.warning("当前参考素材无法跨刷新恢复，刷新后需重新生成");
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id, undefined, retryTask?.pendingId);
@@ -788,9 +901,13 @@ export function useCanvasGeneration({
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
-                    const video = await generateVideoResult(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], controller.signal);
+                    const video = await generateVideoResult(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], controller.signal, retryTask, retryVideoProviderOverride);
                     const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, width: videoSize.width, height: videoSize.height, position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 }, metadata: { ...item.metadata, ...videoMetadata(video), prompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark } } : item)));
+                    if (retryTask) {
+                        useProviderTaskStore.getState().markWritten(retryTask.pendingId);
+                        setNodeTaskMetadata(setNodes, node.id, retryTask.pendingId, TaskStatus.Written);
+                    }
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
