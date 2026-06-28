@@ -10,13 +10,14 @@ import { useProviderConfigStore, type ProviderModelSelection, type ProviderProfi
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageCountSelect, clampCanvasImageCount } from "./canvas-image-count-select";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
+import { CanvasVideoAdvancedSettingsPopover, CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
@@ -44,8 +45,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const mode = defaultMode(node.type);
     const providerProfilesById = useProviderConfigStore((state) => state.profiles);
     const providerProfiles = useMemo(() => Object.values(providerProfilesById), [providerProfilesById]);
-    const imageProviderIssue = mode === "image" ? providerOverrideIssue(node.providerOverride, providerProfiles) : null;
+    const providerIssue = mode === "image" || mode === "video" ? providerOverrideIssue(node.providerOverride, providerProfiles) : null;
     const config = buildNodeConfig(globalConfig, node, mode);
+    const showVideoAdvancedSettings = mode === "video" && isSeedanceVideoConfig(config);
     const imageCount = clampCanvasImageCount(config.count);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
@@ -65,7 +67,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = prompt.trim();
-        if (!text || isRunning || imageProviderIssue) return;
+        if (!text || isRunning || providerIssue) return;
         onGenerate(node.id, mode, text);
         setPrompt("");
     };
@@ -114,14 +116,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             <CreditSymbol />
                             {credits.toLocaleString()}
                         </span>
-                        <Tooltip title={!isRunning && imageProviderIssue ? imageProviderIssue : undefined}>
+                        <Tooltip title={!isRunning && providerIssue ? providerIssue : undefined}>
                             <span className="shrink-0">
                                 <Button
                                     type="primary"
                                     shape="circle"
                                     className="!h-10 !w-10 !min-w-10 shrink-0"
                                     danger={isRunning}
-                                    disabled={!isRunning && (!prompt.trim() || Boolean(imageProviderIssue))}
+                                    disabled={!isRunning && (!prompt.trim() || Boolean(providerIssue))}
                                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                                     aria-label={isRunning ? "停止生成" : "生成"}
                                     icon={isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
@@ -130,7 +132,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </Tooltip>
                     </div>
                 </div>
-                {imageProviderIssue ? <div className="mt-2 px-1 text-xs text-red-500">{imageProviderIssue}</div> : null}
+                {providerIssue ? <div className="mt-2 px-1 text-xs text-red-500">{providerIssue}</div> : null}
             </div>
         );
     }
@@ -158,8 +160,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
+                            <NodeModelSelector capability="video" profiles={providerProfiles} value={node.providerOverride} onChange={(value) => onProviderOverrideChange(node.id, value)} compact />
                             <CanvasVideoSettingsPopover config={config} buttonClassName="!h-9 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            {showVideoAdvancedSettings ? <CanvasVideoAdvancedSettingsPopover config={config} buttonClassName="!h-9 !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} /> : null}
                         </>
                     ) : mode === "audio" ? (
                         <>
@@ -180,13 +183,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         shape="circle"
                         className="!h-10 !w-10 !min-w-10 shrink-0"
                         danger={isRunning}
-                        disabled={!isRunning && !prompt.trim()}
+                        disabled={!isRunning && (!prompt.trim() || Boolean(providerIssue))}
                         onClick={() => (isRunning ? onStop(node.id) : submit())}
                         aria-label={isRunning ? "停止生成" : "生成"}
                         icon={isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
                     />
                 </div>
             </div>
+            {providerIssue ? <div className="mt-2 px-1 text-xs text-red-500">{providerIssue}</div> : null}
         </div>
     );
 }
@@ -249,9 +253,11 @@ function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
+    const model = node.providerOverride?.modelId || node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model);
     return {
         ...globalConfig,
-        model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
+        model,
+        ...(mode === "video" ? { videoModel: model } : {}),
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,

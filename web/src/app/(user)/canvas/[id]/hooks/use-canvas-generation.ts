@@ -182,7 +182,7 @@ export async function generateImageResult(
     providerOverride?: ProviderModelSelection,
     mask?: ReferenceImage,
 ): Promise<{ dataUrl: string | Blob }> {
-    if (shouldUseProvider(config, "image")) {
+    if (shouldUseProviderRouting(config, "image", providerOverride)) {
         const referenceImages = references
             .map(providerReferenceImageUrl)
             .filter((url): url is string => Boolean(url))
@@ -243,13 +243,15 @@ function providerIdForParams(params: { readonly baseUrl?: unknown }) {
 }
 
 function providerIdForVideoRequest(request: { readonly providerId?: string; readonly params: { readonly baseUrl?: unknown; readonly model?: unknown } }) {
+    const providerId = providerIdForRequest(request);
+    if (providerId === "volcengine") return providerId;
     const model = typeof request.params.model === "string" ? request.params.model : "";
     const baseUrl = typeof request.params.baseUrl === "string" ? request.params.baseUrl : "";
-    return isSeedanceVideoConfig({ model, videoModel: model, baseUrl }) ? "volcengine" : providerIdForRequest(request);
+    return isSeedanceVideoConfig({ model, videoModel: model, baseUrl }) ? "volcengine" : providerId;
 }
 
 async function generateAudioResult(config: AiConfig, prompt: string, signal: AbortSignal, task?: CanvasProviderTask, providerOverride?: ProviderModelSelection): Promise<UploadedFile> {
-    if (shouldUseProvider(config, "audio")) {
+    if (shouldUseProviderRouting(config, "audio", providerOverride)) {
         const providerRequest = aiConfigToProviderRequest(config, "audio", { input: prompt }, { providerOverride });
         const result = await defaultProviderClient.generate(providerIdForRequest(providerRequest), { ...providerRequest, signal, pendingId: task?.pendingId, taskContext: task?.taskContext });
         const audio = result.outputs.find((output) => output.type === "audio");
@@ -270,7 +272,7 @@ async function generateVideoResult(
     task?: CanvasProviderTask,
     providerOverride?: ProviderModelSelection,
 ): Promise<UploadedFile> {
-    if (shouldUseProvider(config, "video")) {
+    if (shouldUseProviderRouting(config, "video", providerOverride)) {
         const referenceImages = references
             .map(providerReferenceImageUrl)
             .filter((url): url is string => Boolean(url))
@@ -324,6 +326,10 @@ function finiteNumber(value: string) {
 
 function shouldUseProvider(config: AiConfig, capability: "image" | "audio" | "video") {
     return config.apiFormat === "openai" && isNewProviderEnabled(capability);
+}
+
+function shouldUseProviderRouting(config: AiConfig, capability: "image" | "audio" | "video", providerOverride?: ProviderModelSelection) {
+    return Boolean(providerOverride) || shouldUseProvider(config, capability);
 }
 
 function isCanvasGenerationCanceled(error: unknown) {
@@ -416,12 +422,12 @@ export function useCanvasGeneration({
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             const imageProviderOverride = mode === "image" ? (sourceNode?.type === CanvasNodeType.Image ? sourceNode.providerOverride || providerOverrideForCapability("image") : providerOverrideForCapability("image")) : undefined;
-            const videoProviderOverride = mode === "video" ? (sourceNode?.type === CanvasNodeType.Video ? sourceNode.providerOverride || providerOverrideForCapability("video") : providerOverrideForCapability("video")) : undefined;
+            const videoProviderOverride = mode === "video" ? (sourceNode?.type === CanvasNodeType.Video || sourceNode?.type === CanvasNodeType.Config ? sourceNode.providerOverride || providerOverrideForCapability("video") : providerOverrideForCapability("video")) : undefined;
             const audioProviderOverride = mode === "audio" ? (sourceNode?.type === CanvasNodeType.Audio ? sourceNode.providerOverride || providerOverrideForCapability("audio") : providerOverrideForCapability("audio")) : undefined;
             const usesProviderRouting =
-                (mode === "image" && shouldUseProvider(generationConfig, "image") && Boolean(imageProviderOverride)) ||
-                (mode === "video" && shouldUseProvider(generationConfig, "video") && Boolean(videoProviderOverride)) ||
-                (mode === "audio" && shouldUseProvider(generationConfig, "audio") && Boolean(audioProviderOverride));
+                (mode === "image" && shouldUseProviderRouting(generationConfig, "image", imageProviderOverride)) ||
+                (mode === "video" && shouldUseProviderRouting(generationConfig, "video", videoProviderOverride)) ||
+                (mode === "audio" && shouldUseProviderRouting(generationConfig, "audio", audioProviderOverride));
             if (!usesProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -529,14 +535,14 @@ export function useCanvasGeneration({
                     setDialogNodeId(nodeId);
 
                     const controller = runController;
-                    if (shouldUseProvider(generationConfig, "image") && hasUnrecoverableReferenceImages(referenceImages)) message.warning("当前参考图无法跨刷新恢复，刷新后需重新生成");
+                    if (shouldUseProviderRouting(generationConfig, "image", imageProviderOverride) && hasUnrecoverableReferenceImages(referenceImages)) message.warning("当前参考图无法跨刷新恢复，刷新后需重新生成");
                     targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, nodeId, controller));
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
                     await Promise.all(
                         targetIds.map(async (targetId) => {
-                            const task = shouldUseProvider(generationConfig, "image") ? createProviderTask(projectId, targetId, referenceImages) : undefined;
+                            const task = shouldUseProviderRouting(generationConfig, "image", imageProviderOverride) ? createProviderTask(projectId, targetId, referenceImages) : undefined;
                             if (task) {
                                 useProviderTaskStore.getState().supersedeNodeTasks(projectId, targetId, task.pendingId);
                                 startGenerationRequest(targetId, nodeId, nodeId, controller, task.pendingId);
@@ -618,7 +624,7 @@ export function useCanvasGeneration({
                     pendingChildIds = [videoId];
                     setNodes((prev) => (isEmptyVideoNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode]));
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
-                    const task = shouldUseProvider(generationConfig, "video") ? createProviderTask(projectId, videoId, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios) : undefined;
+                    const task = shouldUseProviderRouting(generationConfig, "video", videoProviderOverride) ? createProviderTask(projectId, videoId, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios) : undefined;
                     if (task && hasUnrecoverableReferences(generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios)) message.warning("当前参考素材无法跨刷新恢复，刷新后需重新生成");
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController, task?.pendingId);
                     if (task) {
@@ -660,7 +666,7 @@ export function useCanvasGeneration({
                     pendingChildIds = [audioId];
                     setNodes((prev) => (isEmptyAudioNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...audioNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), audioNode]));
                     if (!isEmptyAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
-                    const task = shouldUseProvider(generationConfig, "audio") ? createProviderTask(projectId, audioId) : undefined;
+                    const task = shouldUseProviderRouting(generationConfig, "audio", audioProviderOverride) ? createProviderTask(projectId, audioId) : undefined;
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController, task?.pendingId);
                     if (task) {
                         useProviderTaskStore.getState().supersedeNodeTasks(projectId, audioId, task.pendingId);
@@ -846,7 +852,11 @@ export function useCanvasGeneration({
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
             const retryImageProviderOverride = node.type === CanvasNodeType.Image ? node.providerOverride || providerOverrideForCapability("image") : undefined;
             const retryVideoProviderOverride = node.type === CanvasNodeType.Video ? node.providerOverride || providerOverrideForCapability("video") : undefined;
-            const usesProviderRouting = ((node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image")) || (node.type === CanvasNodeType.Video && shouldUseProvider(generationConfig, "video"))) && Boolean(retryImageProviderOverride || retryVideoProviderOverride);
+            const retryAudioProviderOverride = node.type === CanvasNodeType.Audio ? node.providerOverride || providerOverrideForCapability("audio") : undefined;
+            const usesProviderRouting =
+                (node.type === CanvasNodeType.Image && shouldUseProviderRouting(generationConfig, "image", retryImageProviderOverride)) ||
+                (node.type === CanvasNodeType.Video && shouldUseProviderRouting(generationConfig, "video", retryVideoProviderOverride)) ||
+                (node.type === CanvasNodeType.Audio && shouldUseProviderRouting(generationConfig, "audio", retryAudioProviderOverride));
             if (!usesProviderRouting && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -869,7 +879,7 @@ export function useCanvasGeneration({
             const retryImages = retryReferenceImages || [];
 
             const retryTask =
-                (node.type === CanvasNodeType.Image && shouldUseProvider(generationConfig, "image")) || (node.type === CanvasNodeType.Audio && shouldUseProvider(generationConfig, "audio")) || (node.type === CanvasNodeType.Video && shouldUseProvider(generationConfig, "video"))
+                (node.type === CanvasNodeType.Image && shouldUseProviderRouting(generationConfig, "image", retryImageProviderOverride)) || (node.type === CanvasNodeType.Audio && shouldUseProviderRouting(generationConfig, "audio", retryAudioProviderOverride)) || (node.type === CanvasNodeType.Video && shouldUseProviderRouting(generationConfig, "video", retryVideoProviderOverride))
                     ? createProviderTask(projectId, node.id, node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video ? retryImages : [], node.type === CanvasNodeType.Video ? context?.referenceVideos || [] : [], node.type === CanvasNodeType.Video ? context?.referenceAudios || [] : [])
                     : undefined;
             if (retryTask && node.type === CanvasNodeType.Image && hasUnrecoverableReferenceImages(retryImages)) message.warning("当前参考图无法跨刷新恢复，刷新后需重新生成");
@@ -911,7 +921,7 @@ export function useCanvasGeneration({
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const audio = await generateAudioResult(generationConfig, prompt, controller.signal, retryTask, node.providerOverride);
+                    const audio = await generateAudioResult(generationConfig, prompt, controller.signal, retryTask, retryAudioProviderOverride);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
                     if (retryTask) {
                         useProviderTaskStore.getState().markWritten(retryTask.pendingId);

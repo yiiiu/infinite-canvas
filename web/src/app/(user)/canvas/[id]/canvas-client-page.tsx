@@ -855,6 +855,7 @@ function InfiniteCanvasPage() {
                                     isRunning={runningNodeId === contentNode.id}
                                     inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
                                     onConfigChange={handleConfigNodeChange}
+                                    onProviderOverrideChange={handleProviderOverrideChange}
                                     onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                                     onStop={confirmStopGeneration}
                                     onGenerate={(nodeId) => {

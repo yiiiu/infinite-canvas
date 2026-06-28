@@ -109,7 +109,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 }: CanvasNodeProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const providerProfiles = useProviderConfigStore((state) => state.profiles);
-    const providerIssue = data.type === CanvasNodeType.Image ? providerOverrideIssue(data.providerOverride, providerProfiles) : null;
+    const providerIssue = data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video ? providerOverrideIssue(data.providerOverride, providerProfiles) : null;
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);

@@ -69,7 +69,7 @@
         "prompt": { "type": "string" },
         "ratio": { "type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"] },
         "resolution": { "type": "string", "enum": ["480p", "720p", "1080p"] },
-        "videoSeconds": { "type": "number", "minimum": 2, "maximum": 10 },
+        "videoSeconds": { "type": "number", "minimum": 4, "maximum": 15 },
         "generate_audio": { "type": "boolean" },
         "watermark": { "type": "boolean" },
         "referenceImages": {

@@ -327,6 +327,33 @@ test("provider request uses node override profile and model over global default"
     assert.equal(request.params.apiKey, "node-key");
 });
 
+test("video provider request uses node override model over legacy default", () => {
+    useProviderConfigStore.setState({
+        mode: "legacy",
+        profiles: {
+            volcengine: {
+                id: "volcengine",
+                name: "火山方舟",
+                providerId: "volcengine",
+                baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+                apiKey: "volc-key",
+                apiFormat: "openai",
+                models: ["seedance-2-0-pro-250528"],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+        },
+        defaults: { video: { profileId: "volcengine", modelId: "seedance-2-0-pro-250528" } },
+    });
+
+    const request = aiConfigToProviderRequest({ ...config, videoModel: "default::grok-imagine-video", model: "default::grok-imagine-video" }, "video", { prompt: "hello" }, { providerOverride: { profileId: "volcengine", modelId: "seedance-2-0-pro-250528" } });
+
+    assert.equal(request.providerId, "volcengine");
+    assert.equal(request.modelId, "seedance-2-0-pro-250528");
+    assert.equal(request.params.model, "seedance-2-0-pro-250528");
+    assert.equal(request.params.baseUrl, "https://ark.cn-beijing.volces.com/api/v3");
+});
+
 test("blocks provider requests when profile mode default is incomplete", () => {
     useProviderConfigStore.setState({
         mode: "profiles",

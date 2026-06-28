@@ -25,6 +25,10 @@ export const volcengineManifest = manifest as ProviderManifest;
 type SeedanceTask = {
     id: string;
     status?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
+    content?: {
+        video_url?: string;
+        url?: string;
+    };
     result?: {
         videos?: Array<{ url?: string }>;
     };
@@ -210,7 +214,7 @@ export const volcengineAdapter: ProviderAdapter = {
         const task = await pollSeedanceTask(taskId, request, ctx);
 
         if (task.status === "succeeded") {
-            const videoUrl = task.result?.videos?.[0]?.url;
+            const videoUrl = seedanceTaskVideoUrl(task);
             if (!videoUrl) throw new ProviderError(ProviderErrorCode.AdapterError, "视频生成成功但未返回视频 URL");
 
             const videoBlob = await ctx.fetch(videoUrl, { signal: request.signal }).then((r) => r.blob());
@@ -226,6 +230,10 @@ export const volcengineAdapter: ProviderAdapter = {
         throw new ProviderError(ProviderErrorCode.AdapterError, errorMsg);
     },
 };
+
+function seedanceTaskVideoUrl(task: SeedanceTask) {
+    return task.content?.video_url || task.content?.url || task.result?.videos?.[0]?.url;
+}
 
 function normalizeVolcengineBaseUrl(value: unknown) {
     const rawBaseUrl = typeof value === "string" ? value.trim().replace(/\/+$/, "") : "";

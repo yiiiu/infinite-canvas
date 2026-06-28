@@ -1,10 +1,10 @@
 "use client";
 
-import { type ReactNode } from "react";
-import { Switch } from "antd";
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
+import { Slider, Switch } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
-import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
+import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 
@@ -23,6 +23,14 @@ const sizeOptions = [
 ];
 
 const secondOptions = [6, 10, 12, 16, 20];
+const seedanceDurationMin = 4;
+const seedanceDurationMax = 15;
+const seedanceDurationSliderMarks = Array.from({ length: 12 }, (_, index) => index + 4);
+const seedanceDurationSliderEmptyMarks = seedanceDurationSliderMarks.reduce<Record<number, ReactNode>>((result, mark) => {
+    result[mark] = "";
+    return result;
+}, {});
+const normalizeSeedanceSliderValue = (nextValue: number) => Math.max(seedanceDurationMin, Math.min(seedanceDurationMax, Math.round(nextValue)));
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
@@ -107,8 +115,6 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
     const resolution = normalizeSeedanceResolution(config.vquality, model);
     const ratio = normalizeSeedanceRatio(config.size);
     const duration = normalizeSeedanceDuration(config.videoSeconds);
-    const generateAudio = boolConfig(config.videoGenerateAudio, true);
-    const watermark = boolConfig(config.videoWatermark, false);
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -146,15 +152,140 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                     </div>
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
-                    <div className="grid grid-cols-4 gap-2.5">
-                        {seedanceDurationOptions.map((value) => (
-                            <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value === -1 ? "智能" : `${value}s`}
-                            </OptionPill>
-                        ))}
-                    </div>
-                    <NumberInput value={String(duration)} min={-1} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                    <SeedanceDurationSlider value={duration} theme={theme} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
                 </SettingGroup>
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
+function SeedanceDurationSlider({ value, theme, onChange }: { value: number; theme: CanvasTheme; onChange: (value: number) => void }) {
+    const isDraggingRef = useRef(false);
+    const lastCommittedValueRef = useRef(normalizeSeedanceSliderValue(value));
+    const [localValue, setLocalValue] = useState(() => normalizeSeedanceSliderValue(value));
+    const [hoverValue, setHoverValue] = useState<number | null>(null);
+    const selectedValue = normalizeSeedanceSliderValue(localValue);
+    const previewValue = hoverValue ?? selectedValue;
+    const sliderStyle = {
+        "--seedance-duration-active": theme.node.text,
+        "--seedance-duration-inactive": theme.node.stroke,
+        "--seedance-duration-fill": theme.node.fill,
+    } as CSSProperties;
+    const commitValue = (nextValue: number) => {
+        isDraggingRef.current = false;
+        const nextSelected = normalizeSeedanceSliderValue(nextValue);
+
+        setLocalValue(nextSelected);
+        if (nextSelected === lastCommittedValueRef.current) return;
+        lastCommittedValueRef.current = nextSelected;
+        onChange(nextSelected);
+    };
+
+    useEffect(() => {
+        if (isDraggingRef.current) return;
+        const nextValue = normalizeSeedanceSliderValue(value);
+        lastCommittedValueRef.current = nextValue;
+        setLocalValue(nextValue);
+    }, [value]);
+
+    return (
+        <div className="seedance-duration-slider rounded-xl border px-3 pb-2 pt-2.5" style={{ ...sliderStyle, borderColor: theme.node.stroke }}>
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+                <span className="text-xs" style={{ color: theme.node.muted }}>
+                    4s - 15s
+                </span>
+                <span className="rounded-full px-2 py-0.5 text-sm font-medium" style={{ background: theme.node.fill, color: theme.node.text }}>
+                    {selectedValue}s
+                </span>
+            </div>
+            <div onMouseDown={(event) => event.stopPropagation()}>
+                <Slider
+                    min={seedanceDurationMin}
+                    max={seedanceDurationMax}
+                    step={1}
+                    value={localValue}
+                    marks={seedanceDurationSliderEmptyMarks}
+                    dots
+                    tooltip={{ formatter: (nextValue) => `${normalizeSeedanceSliderValue(Number(nextValue) || seedanceDurationMin)}s` }}
+                    aria-label="Seedance 视频时长"
+                    styles={{
+                        rail: { backgroundColor: theme.node.stroke },
+                        track: { backgroundColor: theme.node.text },
+                        handle: { backgroundColor: theme.node.fill, borderColor: theme.node.text, boxShadow: `0 0 0 3px ${theme.node.fill}` },
+                    }}
+                    onChange={(nextValue) => {
+                        isDraggingRef.current = true;
+                        setLocalValue(normalizeSeedanceSliderValue(Number(nextValue)));
+                    }}
+                    onChangeComplete={(nextValue) => commitValue(Number(nextValue))}
+                    onBlur={() => commitValue(localValue)}
+                />
+            </div>
+            <div className="-mt-1 h-5 px-1.5 text-[10px] leading-none" style={{ color: theme.node.muted }} onMouseLeave={() => setHoverValue(null)}>
+                <div className="relative h-full">
+                    {seedanceDurationSliderMarks.map((mark) => {
+                        const active = mark <= previewValue;
+                        const left = `${((mark - seedanceDurationMin) / (seedanceDurationMax - seedanceDurationMin)) * 100}%`;
+                        return (
+                            <button
+                                key={mark}
+                                type="button"
+                                className="absolute top-0 h-5 w-6 -translate-x-1/2 cursor-pointer bg-transparent p-0 text-center text-[10px] leading-none transition hover:opacity-90"
+                                style={{ left, color: active ? theme.node.text : theme.node.muted, fontWeight: active ? 600 : 400, opacity: active ? 1 : 0.58 }}
+                                onMouseEnter={() => setHoverValue(mark)}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={() => commitValue(mark)}
+                            >
+                                {mark}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+            <style jsx>{`
+                .seedance-duration-slider :global(.ant-slider-dot) {
+                    width: 7px;
+                    height: 7px;
+                    background: var(--seedance-duration-fill);
+                    border-color: var(--seedance-duration-inactive);
+                    box-shadow: none;
+                    cursor: pointer;
+                    transition:
+                        background-color 0.16s ease,
+                        border-color 0.16s ease,
+                        box-shadow 0.16s ease,
+                        transform 0.16s ease;
+                }
+
+                .seedance-duration-slider :global(.ant-slider) {
+                    margin: 4px 6px 2px;
+                }
+
+                .seedance-duration-slider :global(.ant-slider-dot)::before {
+                    position: absolute;
+                    inset: -9px;
+                    content: "";
+                    border-radius: 999px;
+                }
+
+                .seedance-duration-slider :global(.ant-slider-dot-active) {
+                    background: var(--seedance-duration-active);
+                    border-color: var(--seedance-duration-active);
+                    box-shadow: 0 0 0 3px color-mix(in srgb, var(--seedance-duration-active) 16%, transparent);
+                    transform: translateX(-50%) scale(1.14);
+                }
+            `}</style>
+        </div>
+    );
+}
+
+export function VideoAdvancedSettingsPanel({ config, onConfigChange, theme, className = "space-y-3" }: Pick<VideoSettingsPanelProps, "config" | "onConfigChange" | "theme"> & { className?: string }) {
+    const generateAudio = boolConfig(config.videoGenerateAudio, true);
+    const watermark = boolConfig(config.videoWatermark, false);
+
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 <SettingGroup title="输出" color={theme.node.muted}>
                     <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
                         <SwitchRow label="生成声音" checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} />
