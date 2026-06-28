@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowUp, LoaderCircle, Square, Tag, X } from "lucide-react";
+import { ArrowUp, Square, Tag, X } from "lucide-react";
 import { Button, Tooltip } from "antd";
 
 import { NodeModelSelector } from "@/components/canvas/node-model-selector";
@@ -137,7 +137,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     return (
         <div
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
+            className="w-[min(820px,calc(100vw-48px))] rounded-2xl border px-4 pb-3 pt-4 shadow-2xl backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
@@ -148,60 +148,45 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={mentionReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className="thin-scrollbar h-24 w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none"
-                style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
+                className="thin-scrollbar min-h-28 w-full resize-none border-0 bg-transparent px-0 py-5 text-base leading-7 outline-none placeholder:opacity-45"
+                style={{ color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
-            <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "video" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-9 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasAudioSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <CanvasAudioSettingsPopover config={config} buttonClassName="!h-9 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                     )}
                 </div>
-                <Tooltip title={!isRunning && imageProviderIssue ? imageProviderIssue : undefined}>
-                    <span className="shrink-0">
-                        <Button
-                            type="primary"
-                            className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                            danger={isRunning}
-                            disabled={!isRunning && (!prompt.trim() || Boolean(imageProviderIssue))}
-                            onClick={() => (isRunning ? onStop(node.id) : submit())}
-                            aria-label={isRunning ? "停止生成" : "生成"}
-                        >
-                            <span className="flex items-center gap-1.5">
-                                {isRunning ? (
-                                    <>
-                                        <LoaderCircle className="size-4 animate-spin" />
-                                        <Square className="size-3.5 fill-current" />
-                                        <span className="text-xs font-medium">停止</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
-                                            <CreditSymbol />
-                                            {credits.toLocaleString()}
-                                        </span>
-                                        <ArrowUp className="size-4" />
-                                    </>
-                                )}
-                            </span>
-                        </Button>
+                <div className="flex shrink-0 items-center gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums" style={{ color: theme.node.muted }}>
+                        <CreditSymbol />
+                        {credits.toLocaleString()}
                     </span>
-                </Tooltip>
+                    <Button
+                        type="primary"
+                        shape="circle"
+                        className="!h-10 !w-10 !min-w-10 shrink-0"
+                        danger={isRunning}
+                        disabled={!isRunning && !prompt.trim()}
+                        onClick={() => (isRunning ? onStop(node.id) : submit())}
+                        aria-label={isRunning ? "停止生成" : "生成"}
+                        icon={isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
+                    />
+                </div>
             </div>
-            {imageProviderIssue ? <div className="mt-1 px-1 text-xs text-red-500">{imageProviderIssue}</div> : null}
         </div>
     );
 }

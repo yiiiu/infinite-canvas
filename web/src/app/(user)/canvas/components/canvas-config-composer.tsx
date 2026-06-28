@@ -109,26 +109,26 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     return (
         <div
             data-canvas-no-zoom
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
+            className="w-[min(820px,calc(100vw-48px))] rounded-2xl border px-4 pb-3 pt-4 shadow-2xl backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={stopCanvasInteraction}
             onPointerDown={stopCanvasInteraction}
             onWheel={(event) => event.stopPropagation()}
         >
-            <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-baseline gap-2">
-                    <div className="shrink-0 text-xs font-semibold">组装提示词</div>
-                    <div className="truncate text-[11px] opacity-55">@ 引用已连接素材，发送前按当前连接重新编号</div>
+            <div className="mb-1 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="text-xs font-semibold">组装提示词</div>
+                    <div className="truncate text-[11px] opacity-55">按 @ 引用已连接素材，发送前按当前连接重新编号</div>
                 </div>
-                <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
+                <Button size="small" type="text" className="!h-8 !w-8 !min-w-8 !rounded-full !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
             </div>
-            <div className="relative rounded-xl border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
-                {!value.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>输入提示词，按 @ 引用连接的图片或文本</div> : null}
+            <div className="relative">
+                {!value.trim() ? <div className="pointer-events-none absolute left-0 top-5 text-base leading-7 opacity-45">输入提示词，按 @ 引用连接的图片或文本</div> : null}
                 <div
                     ref={editorRef}
                     contentEditable
                     suppressContentEditableWarning
-                    className="thin-scrollbar min-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
+                    className="thin-scrollbar min-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words px-0 py-5 text-base leading-7 outline-none"
                     style={{ color: theme.node.text }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
