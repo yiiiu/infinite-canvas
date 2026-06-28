@@ -747,7 +747,7 @@ function computeConnectionTargetTilt(node: CanvasNodeData, point?: Position) {
     const localY = point ? Math.max(0, Math.min(height, point.y - node.position.y)) : height / 2;
     const normalizedX = localX / width - 0.5;
     const normalizedY = localY / height - 0.5;
-    const rotateLimit = 20;
+    const rotateLimit = 26;
 
     return {
         rotateX: -normalizedY * rotateLimit,

@@ -444,7 +444,7 @@
         overflow: hidden;
         background: rgba(255, 255, 255, 0.08);
         box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
-        backdrop-filter: blur(2px) saturate(1.08);
+        backdrop-filter: blur(1px) saturate(1.04);
     }
 
     .canvas-node-connection-acrylic::before {
