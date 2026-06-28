@@ -20,10 +20,11 @@ export const openAICompatAdapter: ProviderAdapter = {
         const auth = context.auth;
         if (!auth) throw new ProviderError(ProviderErrorCode.InvalidRequest, "缺少 Provider Profile 认证配置");
         try {
-            const payload = await getJson(context, auth, "/models", undefined);
+            const payload = await getJson(context, auth, "/models", context.signal);
             return openAIModelList(payload);
         } catch (error) {
             if (error instanceof ProviderError) throw error;
+            if (isAbortError(error)) throw error;
             throw new ProviderError(ProviderErrorCode.NetworkError, error instanceof Error ? error.message : "OpenAI Compatible 模型列表请求失败", { cause: error });
         }
     },
@@ -223,6 +224,10 @@ async function readJson(response: Response): Promise<unknown> {
     } catch {
         return text;
     }
+}
+
+function isAbortError(error: unknown) {
+    return typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";
 }
 
 function openAIModelList(payload: unknown): ModelListResult {

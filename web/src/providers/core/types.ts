@@ -139,6 +139,7 @@ export type AdapterContext = {
     readonly responseMode: ProviderResponseMode;
     readonly pendingId?: string;
     readonly auth?: JsonObject;
+    readonly signal?: AbortSignal;
     readonly updateTask?: (patch: ProviderTaskUpdate) => void | Promise<void>;
 };
 

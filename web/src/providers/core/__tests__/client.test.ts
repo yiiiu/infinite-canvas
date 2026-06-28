@@ -152,6 +152,24 @@ test("listModels returns remote data when adapter implements it", async () => {
     assert.deepEqual(result, { source: "remote", models: [{ id: "remote-model", name: "Remote Model" }] });
 });
 
+test("listModels passes abort signal through adapter context", async () => {
+    const registry = createProviderRegistry();
+    const controller = new AbortController();
+    registry.register({
+        manifest,
+        async generate() {
+            throw new Error("should not generate");
+        },
+        async listModels(context) {
+            assert.equal(context.signal, controller.signal);
+            return { source: "remote", models: [] };
+        },
+    });
+
+    const client = createProviderClient({ registry });
+    await client.listModels("mock", undefined, controller.signal);
+});
+
 test("listModels falls back to manifest models when adapter does not implement it", async () => {
     const registry = createProviderRegistry();
     registry.register({

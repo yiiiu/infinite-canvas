@@ -100,8 +100,10 @@ function CompactNodeModelSelector({
     const models = useMemo(() => modelOptions(profile, capability), [profile, capability]);
     const filteredModels = useMemo(() => filterModels(models, query), [models, query]);
     const normalizedModelId = modelId.trim();
-    const valueInList = normalizedModelId ? models.some((model) => model.id === normalizedModelId) : true;
-    const triggerLabel = profile ? [profileLabel(profile), normalizedModelId || "请选择模型"].join(" · ") : "请选择模型";
+    const selectedModel = normalizedModelId ? models.find((model) => model.id === normalizedModelId) : undefined;
+    const valueInList = normalizedModelId ? Boolean(selectedModel) : true;
+    const modelDisplayName = selectedModel ? modelLabel(selectedModel) : normalizedModelId || "请选择模型";
+    const triggerLabel = profile ? [profileLabel(profile), modelDisplayName].join(" · ") : "请选择模型";
 
     useEffect(() => setDraft(modelId), [modelId]);
 
@@ -176,7 +178,7 @@ function CompactNodeModelSelector({
                                     <div className="thin-scrollbar mt-2 max-h-[178px] overflow-y-auto pr-1">
                                         {!valueInList && normalizedModelId ? <ModelOption id={normalizedModelId} label={`${normalizedModelId}（自定义）`} active onSelect={() => { onModelChange(normalizedModelId); setOpen(false); setQuery(""); }} /> : null}
                                         {filteredModels.length ? (
-                                            filteredModels.map((model) => <ModelOption key={model.id} id={model.id} label={model.name && model.name !== model.id ? `${model.id} · ${model.name}` : model.id} active={model.id === normalizedModelId} onSelect={() => { onModelChange(model.id); setOpen(false); setQuery(""); }} />)
+                                            filteredModels.map((model) => <ModelOption key={model.id} id={model.id} label={modelLabel(model)} active={model.id === normalizedModelId} onSelect={() => { onModelChange(model.id); setOpen(false); setQuery(""); }} />)
                                         ) : models.length ? (
                                             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的模型" />
                                         ) : (
@@ -205,8 +207,9 @@ function NodeModelPicker({ capability, profile, value, onChange }: { capability:
     const models = useMemo(() => modelOptions(profile, capability), [profile, capability]);
     const filteredModels = useMemo(() => filterModels(models, query), [models, query]);
     const normalizedValue = value.trim();
-    const valueInList = normalizedValue ? models.some((model) => model.id === normalizedValue) : true;
-    const triggerLabel = normalizedValue ? (valueInList ? normalizedValue : `${normalizedValue}（自定义）`) : "请选择";
+    const selectedModel = normalizedValue ? models.find((model) => model.id === normalizedValue) : undefined;
+    const valueInList = normalizedValue ? Boolean(selectedModel) : true;
+    const triggerLabel = normalizedValue ? (selectedModel ? modelLabel(selectedModel) : `${normalizedValue}（自定义）`) : "请选择";
 
     useEffect(() => setDraft(value), [value]);
 
@@ -232,7 +235,7 @@ function NodeModelPicker({ capability, profile, value, onChange }: { capability:
                     <div className="thin-scrollbar mt-2 max-h-64 overflow-y-auto pr-1">
                         {!valueInList && normalizedValue ? <ModelOption id={normalizedValue} label={`${normalizedValue}（自定义）`} active onSelect={() => { onChange(normalizedValue); setOpen(false); }} /> : null}
                         {filteredModels.length ? (
-                            filteredModels.map((model) => <ModelOption key={model.id} id={model.id} label={model.name && model.name !== model.id ? `${model.id} · ${model.name}` : model.id} active={model.id === normalizedValue} onSelect={() => { onChange(model.id); setOpen(false); }} />)
+                            filteredModels.map((model) => <ModelOption key={model.id} id={model.id} label={modelLabel(model)} active={model.id === normalizedValue} onSelect={() => { onChange(model.id); setOpen(false); }} />)
                         ) : (
                             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的模型" />
                         )}
@@ -251,12 +254,13 @@ function NodeModelPicker({ capability, profile, value, onChange }: { capability:
 function modelOptions(profile: ProviderProfile | undefined, capability: ProviderConfigCapability): readonly ModelOptionItem[] {
     if (!profile) return [];
     const cachedModels = profile.modelsFetchError ? [] : profile.cachedModels || [];
-    const sourceModels = cachedModels.length ? cachedModels.filter((model) => !model.capability || model.capability === capability || (model.capability === "image-edit" && capability === "image")) : manifestModels(profile.providerId, capability);
+    const sourceModels = cachedModels.length ? cachedModels.filter((model) => !model.capability || model.capability === capability || (model.capability === "image-edit" && capability === "image")) : manifestModels(profile, capability);
     return sortByUsage(uniqueModels(sourceModels), profile.recentlyUsedModels || []);
 }
 
-function manifestModels(providerId: string | undefined, capability: ProviderConfigCapability): readonly ModelOptionItem[] {
-    const models = providerManifest(providerId)?.models || [];
+function manifestModels(profile: ProviderProfile | undefined, capability: ProviderConfigCapability): readonly ModelOptionItem[] {
+    if (!profile || isVolcengineAgentPlanProfile(profile)) return [];
+    const models = providerManifest(profile.providerId)?.models || [];
     return models.filter((model) => model.capabilities.includes(capability as ProviderCapability) || (capability === "image" && model.capabilities.includes("image-edit"))).map((model) => ({ id: model.id, name: model.name }));
 }
 
@@ -285,6 +289,10 @@ function filterModels(models: readonly ModelOptionItem[], query: string) {
     return models.filter((model) => `${model.id} ${model.name || ""}`.toLowerCase().includes(keyword));
 }
 
+function modelLabel(model: ModelOptionItem) {
+    return model.name?.trim() || model.id;
+}
+
 function profileSupportsCapability(profile: ProviderProfile, capability: ProviderConfigCapability) {
     return Boolean(providerManifest(profile.providerId)?.capabilities.includes(capability as ProviderCapability));
 }
@@ -292,6 +300,12 @@ function profileSupportsCapability(profile: ProviderProfile, capability: Provide
 function providerManifest(providerId: string | undefined): ProviderManifest | undefined {
     if (!providerId) return undefined;
     return defaultProviderRegistry.get(providerId)?.manifest;
+}
+
+function isVolcengineAgentPlanProfile(profile: ProviderProfile) {
+    if (profile.providerId !== "volcengine") return false;
+    const baseUrl = (profile.baseUrl || profile.auth?.baseUrl || "").trim().replace(/\/+$/, "").toLowerCase();
+    return baseUrl.endsWith("/api/plan/v3");
 }
 
 function profileLabel(profile: ProviderProfile) {

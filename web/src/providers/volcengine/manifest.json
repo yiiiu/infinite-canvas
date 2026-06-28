@@ -7,23 +7,52 @@
   "capabilities": ["video"],
   "auth": {
     "fields": [
-      { "key": "baseUrl", "type": "string", "label": "Base URL", "placeholder": "https://your-endpoint.volces.com", "required": true },
+      { "key": "baseUrl", "type": "string", "label": "Base URL", "placeholder": "https://ark.cn-beijing.volces.com/api/v3", "required": true },
       { "key": "apiKey", "type": "password", "label": "API Key", "placeholder": "volcengine api key", "required": true }
     ]
   },
-  "allowsCustomModels": false,
+  "allowsCustomModels": true,
   "models": [
     {
-      "id": "vquality",
-      "name": "vquality",
+      "id": "doubao-seedance-2-0-260128",
+      "name": "Seedance 2.0（推荐）",
+      "description": "主流视频生成模型，支持参考图、参考视频和音频。",
       "capabilities": ["video"],
       "supportsReferenceImages": true,
       "supportsReferenceVideos": true,
       "supportsReferenceAudios": true
     },
     {
-      "id": "gpt-img2video-2",
-      "name": "gpt-img2video-2",
+      "id": "doubao-seedance-2-0-fast-260128",
+      "name": "Seedance 2.0 Fast",
+      "description": "更快的视频生成模型，支持参考图、参考视频和音频。",
+      "capabilities": ["video"],
+      "supportsReferenceImages": true,
+      "supportsReferenceVideos": true,
+      "supportsReferenceAudios": true
+    },
+    {
+      "id": "doubao-seedance-1-5-pro-250428",
+      "name": "Seedance 1.5 Pro",
+      "description": "支持参考图、参考视频和音频。",
+      "capabilities": ["video"],
+      "supportsReferenceImages": true,
+      "supportsReferenceVideos": true,
+      "supportsReferenceAudios": true
+    },
+    {
+      "id": "doubao-seedance-1-5-lite-250428",
+      "name": "Seedance 1.5 Lite",
+      "description": "轻量视频生成模型，支持参考图。",
+      "capabilities": ["video"],
+      "supportsReferenceImages": true,
+      "supportsReferenceVideos": false,
+      "supportsReferenceAudios": false
+    },
+    {
+      "id": "doubao-seedance-1-0-pro-250528",
+      "name": "Seedance 1.0 Pro",
+      "description": "支持参考图的视频生成模型。",
       "capabilities": ["video"],
       "supportsReferenceImages": true,
       "supportsReferenceVideos": false,

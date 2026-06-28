@@ -5,7 +5,6 @@ import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { defaultProviderRegistry } from "@/providers";
 import type { ProviderProfile } from "@/providers/config";
 
 type ProviderGroup = {
@@ -26,12 +25,18 @@ type ProfileListProps = {
 
 export function ProfileList({ groups, selectedProfileId, onCreate, onSelect, onToggle, onDelete, onRefreshModels }: ProfileListProps) {
     const empty = groups.length === 0;
-    const [refreshingId, setRefreshingId] = useState("");
+    const [refreshingIds, setRefreshingIds] = useState<Set<string>>(() => new Set());
 
     const refreshModels = (profileId: string) => {
-        if (!onRefreshModels) return;
-        setRefreshingId(profileId);
-        void Promise.resolve(onRefreshModels(profileId)).finally(() => setRefreshingId((current) => (current === profileId ? "" : current)));
+        if (!onRefreshModels || refreshingIds.has(profileId)) return;
+        setRefreshingIds((current) => new Set(current).add(profileId));
+        void Promise.resolve(onRefreshModels(profileId)).finally(() =>
+            setRefreshingIds((current) => {
+                const next = new Set(current);
+                next.delete(profileId);
+                return next;
+            }),
+        );
     };
 
     return (
@@ -58,22 +63,19 @@ export function ProfileList({ groups, selectedProfileId, onCreate, onSelect, onT
                                 {group.profiles.length ? group.profiles.map((profile) => {
                                     const active = profile.id === selectedProfileId;
                                     const enabled = profile.enabled !== false;
-                                    const supportsModelList = Boolean(onRefreshModels && profile.providerId && defaultProviderRegistry.get(profile.providerId)?.listModels);
                                     return (
                                         <div key={profile.id} className={cn("rounded-lg border p-3 transition", active ? "border-stone-900 bg-stone-50 dark:border-stone-100 dark:bg-stone-900" : "border-stone-200 bg-white hover:bg-stone-50 dark:border-stone-800 dark:bg-stone-950 dark:hover:bg-stone-900")}> 
                                             <button type="button" className="block w-full text-left" onClick={() => onSelect(profile.id)}>
                                                 <div className="truncate text-sm font-medium text-stone-950 dark:text-stone-100">{profile.name}</div>
                                                 <div className={cn("mt-1 truncate text-xs", enabled ? "text-emerald-500 dark:text-emerald-400" : "text-stone-400")}>{enabled ? "已启用" : "已禁用"}</div>
-                                                {supportsModelList ? <div className={cn("mt-1 truncate text-xs", profile.modelsFetchError ? "text-red-500 dark:text-red-400" : "text-stone-400")}>{profileModelStatus(profile)}</div> : null}
+                                                <div className={cn("mt-1 truncate text-xs", profile.modelsFetchError ? "text-red-500 dark:text-red-400" : "text-stone-400")}>{profileModelStatus(profile)}</div>
                                             </button>
                                             <div className="mt-3 flex items-center justify-between gap-2">
                                                 <Switch size="small" checked={enabled} className="[&.ant-switch-checked]:!bg-emerald-500 [&.ant-switch-checked:hover]:!bg-emerald-500 dark:[&.ant-switch-checked]:!bg-emerald-400 dark:[&.ant-switch-checked:hover]:!bg-emerald-400" onChange={(checked) => onToggle(profile.id, checked)} />
                                                 <div className="flex items-center gap-1">
-                                                    {supportsModelList ? (
-                                                        <button type="button" className="inline-flex size-7 items-center justify-center rounded-md text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-100" aria-label={`刷新 ${profile.name} 模型列表`} title="刷新模型列表" disabled={refreshingId === profile.id} onClick={() => refreshModels(profile.id)}>
-                                                            <RefreshCw className={cn("size-3.5", refreshingId === profile.id && "animate-spin")} />
-                                                        </button>
-                                                    ) : null}
+                                                    <button type="button" className="inline-flex size-7 items-center justify-center rounded-md text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-100" aria-label={`同步 ${profile.name} 远端模型`} title="同步远端模型" disabled={!onRefreshModels || refreshingIds.has(profile.id)} onClick={() => refreshModels(profile.id)}>
+                                                        <RefreshCw className={cn("size-3.5", refreshingIds.has(profile.id) && "animate-spin")} />
+                                                    </button>
                                                     <Popconfirm title="删除配置档" description="删除后不可恢复，确认删除？" okText="删除" cancelText="取消" onConfirm={() => onDelete(profile.id)}>
                                                         <button type="button" className="inline-flex size-7 items-center justify-center rounded-md text-stone-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30" aria-label={`删除 ${profile.name}`}>
                                                             <Trash2 className="size-3.5" />

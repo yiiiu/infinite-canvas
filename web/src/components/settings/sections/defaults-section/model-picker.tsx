@@ -22,12 +22,14 @@ export function ModelPicker({ profileId, providerId, value, onChange }: ModelPic
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const [draft, setDraft] = useState(value);
-    const models = useMemo(() => modelOptions(profile?.modelsFetchError ? undefined : profile?.cachedModels, providerId), [profile?.cachedModels, profile?.modelsFetchError, providerId]);
+    const profileBaseUrl = profile?.baseUrl || profile?.auth?.baseUrl || "";
+    const models = useMemo(() => modelOptions(profile?.modelsFetchError ? undefined : profile?.cachedModels, providerId, profileBaseUrl), [profile?.cachedModels, profile?.modelsFetchError, profileBaseUrl, providerId]);
     const normalizedValue = value.trim();
     const dropdown = models.length > 0;
     const filteredModels = useMemo(() => filterModels(models, query), [models, query]);
-    const valueInList = normalizedValue ? models.some((model) => model.id === normalizedValue) : true;
-    const triggerLabel = normalizedValue ? (valueInList ? normalizedValue : `${normalizedValue}（自定义）`) : "选择模型";
+    const selectedModel = normalizedValue ? models.find((model) => model.id === normalizedValue) : undefined;
+    const valueInList = normalizedValue ? Boolean(selectedModel) : true;
+    const triggerLabel = normalizedValue ? (selectedModel ? modelLabel(selectedModel) : `${normalizedValue}（自定义）`) : "选择模型";
 
     useEffect(() => setDraft(value), [value]);
 
@@ -61,7 +63,7 @@ export function ModelPicker({ profileId, providerId, value, onChange }: ModelPic
                     <div className="thin-scrollbar mt-2 max-h-64 overflow-y-auto pr-1">
                         {!valueInList && normalizedValue ? <ModelOption id={normalizedValue} label={`${normalizedValue}（自定义）`} active onSelect={() => { onChange(normalizedValue); setOpen(false); }} /> : null}
                         {filteredModels.length ? (
-                            filteredModels.map((model) => <ModelOption key={model.id} id={model.id} label={model.name && model.name !== model.id ? `${model.id} · ${model.name}` : model.id} active={model.id === normalizedValue} onSelect={() => { onChange(model.id); setOpen(false); }} />)
+                            filteredModels.map((model) => <ModelOption key={model.id} id={model.id} label={modelLabel(model)} active={model.id === normalizedValue} onSelect={() => { onChange(model.id); setOpen(false); }} />)
                         ) : (
                             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的模型" />
                         )}
@@ -77,9 +79,9 @@ export function ModelPicker({ profileId, providerId, value, onChange }: ModelPic
     );
 }
 
-function modelOptions(cachedModels: readonly ModelInfo[] | undefined, providerId: string | undefined) {
+function modelOptions(cachedModels: readonly ModelInfo[] | undefined, providerId: string | undefined, profileBaseUrl: string) {
     if (cachedModels?.length) return uniqueModels(cachedModels);
-    if (!providerId) return [];
+    if (!providerId || isVolcengineAgentPlanProfile(providerId, profileBaseUrl)) return [];
     const manifestModels = defaultProviderRegistry.get(providerId)?.manifest.models || [];
     return uniqueModels(manifestModels.map((model) => ({ id: model.id, name: model.name })));
 }
@@ -98,6 +100,16 @@ function filterModels(models: readonly Pick<ModelInfo, "id" | "name">[], query: 
     const keyword = query.trim().toLowerCase();
     if (!keyword) return models;
     return models.filter((model) => `${model.id} ${model.name || ""}`.toLowerCase().includes(keyword));
+}
+
+function modelLabel(model: Pick<ModelInfo, "id" | "name">) {
+    return model.name?.trim() || model.id;
+}
+
+function isVolcengineAgentPlanProfile(providerId: string, profileBaseUrl: string) {
+    if (providerId !== "volcengine") return false;
+    const baseUrl = profileBaseUrl.trim().replace(/\/+$/, "").toLowerCase();
+    return baseUrl.endsWith("/api/plan/v3");
 }
 
 function ModelOption({ id, label, active, onSelect }: { id: string; label: string; active: boolean; onSelect: () => void }) {

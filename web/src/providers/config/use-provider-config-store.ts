@@ -7,13 +7,18 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import { migrateAiConfigToProviderConfig, normalizeProviderConfigData } from "./migration";
 import { PROVIDER_CONFIG_STORE_KEY, type ProviderConfigData, type ProviderConfigCapability, type ProviderConfigMode, type ProviderModelSelection, type ProviderProfile } from "./types";
-import type { ModelListResult } from "../core/types";
+import { ProviderError, ProviderErrorCode, type ModelListResult } from "../core/types";
 
-type ProfileModelListLoader = (providerId: string, profileId: string) => Promise<ModelListResult>;
+type ProfileModelListLoader = (providerId: string, profileId: string, signal?: AbortSignal) => Promise<ModelListResult>;
 
-let profileModelListLoader: ProfileModelListLoader = async (providerId, profileId) => {
+type ProfileModelMergeResult = {
+    readonly total: number;
+    readonly added: number;
+};
+
+let profileModelListLoader: ProfileModelListLoader = async (providerId, profileId, signal) => {
     const { defaultProviderClient } = await import("../index");
-    return defaultProviderClient.listModels(providerId, profileId);
+    return defaultProviderClient.listModels(providerId, profileId, signal);
 };
 
 export function setProfileModelListLoaderForTests(loader: ProfileModelListLoader) {
@@ -21,9 +26,9 @@ export function setProfileModelListLoaderForTests(loader: ProfileModelListLoader
 }
 
 export function resetProfileModelListLoaderForTests() {
-    profileModelListLoader = async (providerId, profileId) => {
+    profileModelListLoader = async (providerId, profileId, signal) => {
         const { defaultProviderClient } = await import("../index");
-        return defaultProviderClient.listModels(providerId, profileId);
+        return defaultProviderClient.listModels(providerId, profileId, signal);
     };
 }
 
@@ -48,7 +53,9 @@ type ProviderConfigStore = ProviderConfigData & {
     removeProfile: (profileId: string) => void;
     setDefault: (capability: ProviderConfigCapability, value: ProviderModelSelection | null) => void;
     setDefaultSelection: (capability: ProviderConfigCapability, selection: ProviderModelSelection | undefined) => void;
-    refreshProfileModels: (profileId: string) => Promise<void>;
+    refreshProfileModels: (profileId: string, signal?: AbortSignal) => Promise<void>;
+    syncProfileModels: (profileId: string, signal?: AbortSignal) => Promise<ProfileModelMergeResult>;
+    mergeProfileModels: (profileId: string, modelIds: readonly string[]) => ProfileModelMergeResult;
     updateProfileModels: (profileId: string, data: { models: ModelListResult["models"]; fetchedAt: number; error?: string }) => void;
     recordModelUsage: (profileId: string, modelId: string) => void;
     getProfileModels: (profileId: string) => { models: ModelListResult["models"]; fetchedAt?: number; error?: string };
@@ -137,11 +144,11 @@ export const useProviderConfigStore = create<ProviderConfigStore>()(
                         : Object.fromEntries(Object.entries(state.defaults).filter(([key]) => key !== capability)),
                 })),
             setDefaultSelection: (capability, selection) => get().setDefault(capability, selection ?? null),
-            refreshProfileModels: async (profileId) => {
+            refreshProfileModels: async (profileId, signal) => {
                 const profile = get().profiles[profileId];
-                if (!profile?.providerId) return;
+                if (!profile?.providerId) return undefined;
                 try {
-                    const result = await profileModelListLoader(profile.providerId, profileId);
+                    const result = await profileModelListLoader(profile.providerId, profileId, signal);
                     set((state) => {
                         const current = state.profiles[profileId];
                         if (!current) return {};
@@ -159,6 +166,7 @@ export const useProviderConfigStore = create<ProviderConfigStore>()(
                         };
                     });
                 } catch (error) {
+                    if (isCanceledError(error)) return;
                     set((state) => {
                         const current = state.profiles[profileId];
                         if (!current) return {};
@@ -174,6 +182,40 @@ export const useProviderConfigStore = create<ProviderConfigStore>()(
                         };
                     });
                 }
+            },
+            syncProfileModels: async (profileId, signal) => {
+                const profile = get().profiles[profileId];
+                if (!profile?.providerId) return { total: 0, added: 0 };
+                const result = await profileModelListLoader(profile.providerId, profileId, signal);
+                get().updateProfileModels(profileId, { models: result.models, fetchedAt: Date.now() });
+                return get().mergeProfileModels(
+                    profileId,
+                    result.models.map((model) => model.id),
+                );
+            },
+            mergeProfileModels: (profileId, modelIds) => {
+                const total = modelIds.length;
+                let added = 0;
+                set((state) => {
+                    const profile = state.profiles[profileId];
+                    if (!profile) return {};
+                    const existing = new Set(profile.models);
+                    const nextModels = [...profile.models];
+                    for (const modelId of modelIds) {
+                        if (!modelId || existing.has(modelId)) continue;
+                        existing.add(modelId);
+                        nextModels.push(modelId);
+                        added += 1;
+                    }
+                    if (!added) return {};
+                    return {
+                        profiles: {
+                            ...state.profiles,
+                            [profileId]: { ...profile, models: nextModels, updatedAt: new Date().toISOString() },
+                        },
+                    };
+                });
+                return { total, added };
             },
             updateProfileModels: (profileId, data) =>
                 set((state) => {
@@ -238,6 +280,10 @@ export const useProviderConfigStore = create<ProviderConfigStore>()(
         },
     ),
 );
+
+function isCanceledError(error: unknown) {
+    return (error instanceof ProviderError && error.code === ProviderErrorCode.Canceled) || (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError");
+}
 
 function createProfileId(providerId: string, profiles: Record<string, ProviderProfile>) {
     const prefix = `profile-${providerId.replace(/[^a-z0-9-]/gi, "-").toLowerCase()}`;

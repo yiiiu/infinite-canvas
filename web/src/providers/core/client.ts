@@ -6,7 +6,7 @@ import { ProviderError, ProviderErrorCode, type AdapterContext, type GenerateReq
 
 export type ProviderClient = {
     generate: <TParams extends JsonObject = JsonObject>(providerId: string, request: GenerateRequest<TParams>) => Promise<GenerateResult>;
-    listModels: (providerId: string, profileId?: string) => Promise<ModelListResult>;
+    listModels: (providerId: string, profileId?: string, signal?: AbortSignal) => Promise<ModelListResult>;
 };
 
 export type ProviderClientOptions = {
@@ -71,7 +71,7 @@ export function createProviderClient(options: ProviderClientOptions = {}): Provi
             }
         },
 
-        async listModels(providerId, profileId) {
+        async listModels(providerId, profileId, signal) {
             const adapter = registry.get(providerId);
             if (!adapter) {
                 throw new ProviderError(ProviderErrorCode.ProviderNotFound, `Provider 未注册：${providerId}`, {
@@ -83,6 +83,7 @@ export function createProviderClient(options: ProviderClientOptions = {}): Provi
                 ...baseContext,
                 responseMode: adapter.manifest.responseMode,
                 auth: profileId ? profileAuth(providerId, profileId) : undefined,
+                signal,
             };
 
             if (!adapter.listModels) return manifestModelList(adapter);
@@ -91,6 +92,7 @@ export function createProviderClient(options: ProviderClientOptions = {}): Provi
                 return await adapter.listModels(context);
             } catch (error) {
                 if (error instanceof ProviderError) throw error;
+                if (isAbortError(error)) throw new ProviderError(ProviderErrorCode.Canceled, "请求已取消", { cause: error });
                 throw new ProviderError(ProviderErrorCode.AdapterError, error instanceof Error ? error.message : "Provider 模型列表读取失败", {
                     cause: error,
                     details: { providerId, ...(profileId ? { profileId } : {}) },

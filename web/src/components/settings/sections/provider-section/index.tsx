@@ -1,10 +1,11 @@
 "use client";
 
-import { Alert } from "antd";
+import { Alert, App } from "antd";
 import { ServerCog } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { defaultProviderRegistry } from "@/providers";
+import { ProviderError, ProviderErrorCode } from "@/providers/core/types";
 import { useProviderConfigStore, type ProviderProfile } from "@/providers/config";
 import { ProfileForm, type ProfileFormValue, type ProviderOption } from "./profile-form";
 import { ProfileList } from "./profile-list";
@@ -15,12 +16,18 @@ type ProviderGroup = {
     profiles: ProviderProfile[];
 };
 
-export function ProviderSettingsSection() {
+type ProviderSettingsSectionProps = {
+    abortSignal?: AbortSignal;
+};
+
+export function ProviderSettingsSection({ abortSignal }: ProviderSettingsSectionProps) {
+    const { message } = App.useApp();
     const profilesMap = useProviderConfigStore((state) => state.profiles);
     const createProfile = useProviderConfigStore((state) => state.createProfile);
     const updateProfile = useProviderConfigStore((state) => state.updateProfile);
     const setProfileEnabled = useProviderConfigStore((state) => state.setProfileEnabled);
     const removeProfile = useProviderConfigStore((state) => state.removeProfile);
+    const syncProfileModels = useProviderConfigStore((state) => state.syncProfileModels);
     const [selectedProfileId, setSelectedProfileId] = useState("");
     const [creating, setCreating] = useState(false);
     const [creatingProviderId, setCreatingProviderId] = useState<string | undefined>(undefined);
@@ -64,6 +71,16 @@ export function ProviderSettingsSection() {
         if (selectedProfileId === profileId) setSelectedProfileId("");
     };
 
+    const refreshProfileModels = async (profileId: string) => {
+        try {
+            const result = await syncProfileModels(profileId, abortSignal);
+            message.success(`已同步 ${result.total} 个模型，新增 ${result.added} 个`);
+        } catch (error) {
+            if (isCanceledError(error)) return;
+            message.error(error instanceof Error ? error.message : "同步模型失败");
+        }
+    };
+
     return (
         <div className="flex h-full min-h-0 flex-col gap-4">
             <div className="flex items-start justify-between gap-4">
@@ -77,7 +94,7 @@ export function ProviderSettingsSection() {
             </div>
             <Alert type="info" showIcon message="Profile 只保存连接信息" description="配置档仅保存 API Key、Base URL 等连接信息。模型选择在画布节点上进行。" />
             <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-4">
-                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); }} onToggle={setProfileEnabled} onDelete={deleteProfile} />
+                <ProfileList groups={groups} selectedProfileId={activeProfile?.id || ""} onCreate={startCreate} onSelect={(id) => { setSelectedProfileId(id); setCreating(false); }} onToggle={setProfileEnabled} onDelete={deleteProfile} onRefreshModels={refreshProfileModels} />
                 <ProfileForm key={activeKey} profile={activeProfile} profiles={profiles} providerOptions={providerOptions} initialProviderId={creatingProviderId} onSave={saveProfile} onCancelCreate={creating ? () => { setCreating(false); setCreatingProviderId(undefined); } : undefined} />
             </div>
         </div>
@@ -98,4 +115,8 @@ function buildGroups(profiles: readonly ProviderProfile[], providerOptions: read
             .filter((profile) => (profile.providerId || "unknown") === providerId)
             .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     }));
+}
+
+function isCanceledError(error: unknown) {
+    return (error instanceof ProviderError && error.code === ProviderErrorCode.Canceled) || (error instanceof DOMException && error.name === "AbortError");
 }

@@ -83,6 +83,15 @@ test("refreshProfileModels stores model cache and clears previous error", async 
     assert.deepEqual(useProviderConfigStore.getState().getProfileModels(profile.id).models, stored.cachedModels);
 });
 
+test("mergeProfileModels appends new model ids without reordering existing ids", () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", models: ["gpt-4o", "GPT-4o"] });
+
+    const result = useProviderConfigStore.getState().mergeProfileModels(profile.id, ["GPT-4o", "gpt-image-1", "gpt-4o", "sora"]);
+
+    assert.deepEqual(result, { total: 4, added: 2 });
+    assert.deepEqual(useProviderConfigStore.getState().profiles[profile.id].models, ["gpt-4o", "GPT-4o", "gpt-image-1", "sora"]);
+});
+
 test("refreshProfileModels keeps old cache when loading fails", async () => {
     const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
     useProviderConfigStore.getState().updateProfile(profile.id, { cachedModels: [{ id: "cached-model" }], modelsFetchedAt: 123 });
@@ -96,6 +105,21 @@ test("refreshProfileModels keeps old cache when loading fails", async () => {
     assert.deepEqual(stored.cachedModels, [{ id: "cached-model" }]);
     assert.equal(stored.modelsFetchedAt, 123);
     assert.equal(stored.modelsFetchError, "上游不可用");
+});
+
+test("refreshProfileModels ignores canceled loading without changing cache state", async () => {
+    const profile = useProviderConfigStore.getState().createProfile({ name: "OpenAI Compatible 1", providerId: "openai-compat", auth: { baseUrl: "https://api.example.com", apiKey: "key" }, baseUrl: "https://api.example.com", apiKey: "key" });
+    useProviderConfigStore.getState().updateProfile(profile.id, { cachedModels: [{ id: "cached-model" }], modelsFetchedAt: 123, modelsFetchError: "旧错误" });
+    setProfileModelListLoaderForTests(async () => {
+        throw new DOMException("Aborted", "AbortError");
+    });
+
+    await useProviderConfigStore.getState().refreshProfileModels(profile.id);
+
+    const stored = useProviderConfigStore.getState().profiles[profile.id];
+    assert.deepEqual(stored.cachedModels, [{ id: "cached-model" }]);
+    assert.equal(stored.modelsFetchedAt, 123);
+    assert.equal(stored.modelsFetchError, "旧错误");
 });
 
 test("refreshProfileModels ignores missing profile", async () => {
