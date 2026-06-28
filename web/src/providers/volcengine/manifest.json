@@ -3,11 +3,11 @@
   "name": "火山方舟 (Volcengine)",
   "version": "0.1.0",
   "description": "火山方舟视频生成 Provider，支持 Seedance 视频生成。",
-  "responseMode": "async",
+  "responseMode": "async-pollable",
   "capabilities": ["video"],
   "auth": {
     "fields": [
-      { "key": "baseUrl", "type": "text", "label": "Base URL", "placeholder": "https://your-endpoint.volces.com", "required": true },
+      { "key": "baseUrl", "type": "string", "label": "Base URL", "placeholder": "https://your-endpoint.volces.com", "required": true },
       { "key": "apiKey", "type": "password", "label": "API Key", "placeholder": "volcengine api key", "required": true }
     ]
   },

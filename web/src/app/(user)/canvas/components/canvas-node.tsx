@@ -335,8 +335,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
             </div>
 
-            <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
-            <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
+            <ConnectionHandleDot side="left" visible={hovered || isSelected} disabled={isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
+            <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected)} disabled={isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] pt-4" style={{ transform: `translateX(-50%) scale(${1 / scale})`, transformOrigin: '50% 0' }}>{renderPanel(data)}</div> : null}
         </div>
@@ -707,17 +707,47 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     return <div className={`absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
 }
 
-function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "right"; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
+function ConnectionHandleDot({ side, visible, disabled, onMouseDown }: { side: "left" | "right"; visible: boolean; disabled: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const [hot, setHot] = useState(false);
+    const [offset, setOffset] = useState({ x: 0, y: 0 });
+    const show = !disabled && (visible || hot);
+
+    const updateOffset = (event: React.MouseEvent<HTMLDivElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const maxX = 12;
+        const maxUp = 24;
+        const maxDown = 12;
+        const x = Math.max(-maxX, Math.min(maxX, event.clientX - (rect.left + rect.width / 2)));
+        const y = Math.max(-maxUp, Math.min(maxDown, event.clientY - (rect.top + rect.height / 2)));
+        setOffset({ x, y });
+    };
+
+    const resetOffset = () => {
+        setHot(false);
+        setOffset({ x: 0, y: 0 });
+    };
 
     return (
         <div
-            className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
-                side === "left" ? "-left-6" : "-right-6"
-            } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            className={`absolute top-1/2 z-30 flex size-20 -translate-y-1/2 cursor-crosshair items-center justify-center ${side === "left" ? "-left-[58px]" : "-right-[58px]"} ${disabled ? "pointer-events-none" : "pointer-events-auto"}`}
+            onMouseEnter={() => setHot(true)}
+            onMouseMove={updateOffset}
+            onMouseLeave={resetOffset}
             onMouseDown={onMouseDown}
         >
-            <div className="size-3 rounded-full border-2 transition-all hover:scale-125" style={{ background: theme.node.panel, borderColor: theme.node.muted }} />
+            <div
+                className={`relative flex size-6 items-center justify-center rounded-full border shadow-sm backdrop-blur transition-[opacity,transform] duration-100 ease-out ${show ? "opacity-100" : "opacity-0"}`}
+                style={{
+                    background: `${theme.canvas.background}cc`,
+                    borderColor: theme.node.muted,
+                    color: theme.node.muted,
+                    transform: `translate(${offset.x}px, ${offset.y}px)`,
+                }}
+            >
+                <span className="absolute h-px w-2.5 rounded-full bg-current" />
+                <span className="absolute h-2.5 w-px rounded-full bg-current" />
+            </div>
         </div>
     );
 }

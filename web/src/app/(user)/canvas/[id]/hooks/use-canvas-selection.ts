@@ -241,7 +241,6 @@ export function useCanvasSelection({
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
         draggingElementsRef.current = [];
-        draggingConnectionsRef.current = [];
 
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
