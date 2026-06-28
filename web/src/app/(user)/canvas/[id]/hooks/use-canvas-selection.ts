@@ -3,7 +3,7 @@ import type { Dispatch, MouseEvent as ReactMouseEvent, PointerEvent as ReactPoin
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ConnectionHandle, type ContextMenuState, type Position, type SelectionBox, type ViewportTransform } from "../../types";
 import type { PendingConnectionCreate } from "./use-canvas-connections";
 import { isHiddenBatchChild } from "../../utils/canvas-node-config";
-import { computeConnectionPathD } from "../../components/canvas-connections";
+import { computeConnectionPathD, computeActiveConnectionPathD } from "../../components/canvas-connections";
 
 type Params = {
     selectedNodeIds: Set<string>;
@@ -77,8 +77,10 @@ export function useCanvasSelection({
         hasMoved: boolean;
         startX: number;
         startY: number;
+        activeNodeId: string | null;
+        selectedCount: number;
         initialSelectedNodes: { id: string; x: number; y: number }[];
-    }>({ isDraggingNode: false, hasMoved: false, startX: 0, startY: 0, initialSelectedNodes: [] });
+    }>({ isDraggingNode: false, hasMoved: false, startX: 0, startY: 0, activeNodeId: null, selectedCount: 0, initialSelectedNodes: [] });
     const rafRef = useRef<number | null>(null);
     const draggingElementsRef = useRef<Array<{ el: HTMLElement; initialX: number; initialY: number }>>([]);
     const draggingConnectionsRef = useRef<
@@ -88,6 +90,11 @@ export function useCanvasSelection({
             toNode: { id: string; initialX: number; initialY: number; width: number; height: number; isDragged: boolean };
         }>
     >([]);
+    const draggingActiveConnectionRef = useRef<{
+        pathEl: SVGPathElement;
+        handle: ConnectionHandle;
+        node: { initialX: number; initialY: number; width: number; height: number };
+    } | null>(null);
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreateRef.current();
@@ -159,6 +166,8 @@ export function useCanvasSelection({
             hasMoved: false,
             startX: event.clientX,
             startY: event.clientY,
+            activeNodeId: nodeId,
+            selectedCount: nextSelected.size,
             initialSelectedNodes: currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.position.x, y: node.position.y })),
         };
 
@@ -206,6 +215,25 @@ export function useCanvasSelection({
             })
             .filter(Boolean) as typeof draggingConnectionsRef.current;
 
+        // Collect active connection path if its source node is being dragged
+        const connectingHandle = connectingParamsRef.current;
+        if (connectingHandle && draggedIds.has(connectingHandle.nodeId)) {
+            const connectingNode = allNodes.find((n) => n.id === connectingHandle.nodeId);
+            const pathEl = document.querySelector<SVGPathElement>('[data-active-connection="true"]');
+            if (connectingNode && pathEl) {
+                draggingActiveConnectionRef.current = {
+                    pathEl,
+                    handle: connectingHandle,
+                    node: {
+                        initialX: connectingNode.position.x,
+                        initialY: connectingNode.position.y,
+                        width: connectingNode.width,
+                        height: connectingNode.height,
+                    },
+                };
+            }
+        }
+
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         setIsNodeDragging(true);
@@ -220,6 +248,8 @@ export function useCanvasSelection({
 
         const wasClick = !dragRef.current.hasMoved && dragRef.current.initialSelectedNodes.length === 1;
         const clickedNodeId = dragRef.current.initialSelectedNodes[0]?.id;
+        const shouldRestoreActiveNode = dragRef.current.hasMoved && dragRef.current.selectedCount === 1;
+        const activeNodeId = dragRef.current.activeNodeId;
         const dx = clientX == null ? 0 : (clientX - dragRef.current.startX) / viewportRef.current.k;
         const dy = clientY == null ? 0 : (clientY - dragRef.current.startY) / viewportRef.current.k;
         const initialPositions = dragRef.current.initialSelectedNodes;
@@ -239,8 +269,11 @@ export function useCanvasSelection({
 
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
+        dragRef.current.activeNodeId = null;
+        dragRef.current.selectedCount = 0;
         dragRef.current.initialSelectedNodes = [];
         draggingElementsRef.current = [];
+        draggingActiveConnectionRef.current = null;
 
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
@@ -249,6 +282,16 @@ export function useCanvasSelection({
                 setDialogNodeId((current) => (current === clickedNodeId ? current : null));
             } else {
                 setDialogNodeId(clickedNodeId);
+            }
+        } else if (shouldRestoreActiveNode && activeNodeId) {
+            const activeNode = nodesRef.current.find((node) => node.id === activeNodeId);
+            if (activeNode) {
+                keepNodeToolbar(activeNodeId);
+                if (activeNode.type === CanvasNodeType.Text) {
+                    setDialogNodeId((current) => (current === activeNodeId ? current : null));
+                } else {
+                    setDialogNodeId(activeNodeId);
+                }
             }
         }
     }, []);
@@ -287,6 +330,24 @@ export function useCanvasSelection({
 
                     for (const el of pathEls) {
                         el.setAttribute("d", d);
+                    }
+                }
+
+                // Update active connection path if its source node is being dragged
+                const activeConn = draggingActiveConnectionRef.current;
+                if (activeConn) {
+                    const frozenMouseWorld = pendingConnectionCreateRef.current?.position;
+                    if (frozenMouseWorld) {
+                        const d = computeActiveConnectionPathD({
+                            node: {
+                                position: { x: activeConn.node.initialX + dx, y: activeConn.node.initialY + dy },
+                                width: activeConn.node.width,
+                                height: activeConn.node.height,
+                            },
+                            handle: activeConn.handle,
+                            mouseWorld: frozenMouseWorld,
+                        });
+                        activeConn.pathEl.setAttribute("d", d);
                     }
                 }
                 return;

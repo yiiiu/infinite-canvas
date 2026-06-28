@@ -715,9 +715,9 @@ function ConnectionHandleDot({ side, visible, disabled, onMouseDown }: { side: "
 
     const updateOffset = (event: React.MouseEvent<HTMLDivElement>) => {
         const rect = event.currentTarget.getBoundingClientRect();
-        const maxX = 12;
-        const maxUp = 24;
-        const maxDown = 12;
+        const maxX = 20;
+        const maxUp = 34;
+        const maxDown = 20;
         const x = Math.max(-maxX, Math.min(maxX, event.clientX - (rect.left + rect.width / 2)));
         const y = Math.max(-maxUp, Math.min(maxDown, event.clientY - (rect.top + rect.height / 2)));
         setOffset({ x, y });
@@ -730,14 +730,14 @@ function ConnectionHandleDot({ side, visible, disabled, onMouseDown }: { side: "
 
     return (
         <div
-            className={`absolute top-1/2 z-30 flex size-20 -translate-y-1/2 cursor-crosshair items-center justify-center ${side === "left" ? "-left-[58px]" : "-right-[58px]"} ${disabled ? "pointer-events-none" : "pointer-events-auto"}`}
+            className={`absolute top-1/2 z-30 flex h-24 w-16 -translate-y-1/2 cursor-crosshair items-center justify-center ${side === "left" ? "-left-16" : "-right-16"} ${disabled ? "pointer-events-none" : "pointer-events-auto"}`}
             onMouseEnter={() => setHot(true)}
             onMouseMove={updateOffset}
             onMouseLeave={resetOffset}
             onMouseDown={onMouseDown}
         >
             <div
-                className={`relative flex size-6 items-center justify-center rounded-full border shadow-sm backdrop-blur transition-[opacity,transform] duration-100 ease-out ${show ? "opacity-100" : "opacity-0"}`}
+                className={`relative flex size-7 items-center justify-center rounded-full border shadow-sm backdrop-blur transition-[opacity,transform] duration-100 ease-out ${show ? "opacity-100" : "opacity-0"}`}
                 style={{
                     background: `${theme.canvas.background}cc`,
                     borderColor: theme.node.muted,
@@ -745,8 +745,8 @@ function ConnectionHandleDot({ side, visible, disabled, onMouseDown }: { side: "
                     transform: `translate(${offset.x}px, ${offset.y}px)`,
                 }}
             >
-                <span className="absolute h-px w-2.5 rounded-full bg-current" />
-                <span className="absolute h-2.5 w-px rounded-full bg-current" />
+                <span className="absolute h-px w-3 rounded-full bg-current" />
+                <span className="absolute h-3 w-px rounded-full bg-current" />
             </div>
         </div>
     );
